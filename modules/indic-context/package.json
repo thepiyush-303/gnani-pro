@@ -1,0 +1,15 @@
+{
+  "name": "indic-context",
+  "version": "1.0.0",
+  "description": "Local Expo module for IndicContext Assistant — overlay, accessibility buffer, and text injection.",
+  "main": "src/index.ts",
+  "files": [
+    "src",
+    "android",
+    "app.plugin.js",
+    "expo-module.config.json"
+  ],
+  "peerDependencies": {
+    "expo-modules-core": "*"
+  }
+}

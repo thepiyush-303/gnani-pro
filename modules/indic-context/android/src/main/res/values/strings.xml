@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_service_description">IndicContext Assistant captures visible chat text in supported messaging apps to provide contextual AI suggestions and smart replies. No data is stored on disk.</string>
+</resources>
+
