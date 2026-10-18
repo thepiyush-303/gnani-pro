@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- drag_handle_bg.xml — Pill-shaped drag indicator -->
+<!-- drag_handle_bg.xml - Pill-shaped drag indicator -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <solid android:color="#4D94A3B8" />

@@ -227,7 +227,7 @@ class ChatAccessibilityService : AccessibilityService() {
     }
 
     private fun clearFocusedNode() {
-        try { focusedInputNode?.recycle() } catch (_: Exception) {}
+        try { focusedInputNode?.recycle() } catch (e: Exception) {}
         focusedInputNode = null
     }
 

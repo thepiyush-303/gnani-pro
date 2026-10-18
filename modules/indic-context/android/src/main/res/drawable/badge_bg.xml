@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- badge_bg.xml — Context message count pill badge -->
+<!-- badge_bg.xml - Context message count pill badge -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <solid android:color="#6366F1" />

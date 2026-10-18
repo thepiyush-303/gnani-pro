@@ -1,17 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  overlay_panel.xml — Phase 2 copilot toolbar
-
-  Full-width floating card with:
-  ┌────────────────────────────────────────────────────┐
-  │   ▬▬  drag handle             [12 ctx]  [✕]       │
-  │  🎤      🎨      ✅      ❄️                        │
-  │ Voice   Tone   Fact    Ice                         │
-  └────────────────────────────────────────────────────┘
-
-  The FrameLayout root is transparent and NOT clickable,
-  so touches outside the card pass through to WhatsApp/Telegram.
--->
+<!-- overlay_panel.xml - Phase 2 copilot toolbar -->
 <FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -31,7 +19,7 @@
         android:background="@drawable/overlay_bg"
         android:elevation="10dp">
 
-        <!-- ── Row 1: drag handle + context badge + close ── -->
+        <!-- Row 1: drag handle + context badge + close -->
         <RelativeLayout
             android:layout_width="match_parent"
             android:layout_height="30dp"
@@ -48,12 +36,25 @@
                 android:clickable="true"
                 android:focusable="true" />
 
-            <!-- Context message count badge -->
+            <!-- Close button (right) -->
+            <ImageButton
+                android:id="@+id/btn_close"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:background="@android:color/transparent"
+                android:src="@android:drawable/ic_menu_close_clear_cancel"
+                android:contentDescription="Close copilot"
+                android:padding="5dp"
+                android:scaleType="fitCenter" />
+
+            <!-- Context message count badge (to the left of close) -->
             <TextView
                 android:id="@+id/context_badge"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_toStartOf="@+id/btn_close"
+                android:layout_toStartOf="@id/btn_close"
                 android:layout_centerVertical="true"
                 android:layout_marginEnd="4dp"
                 android:background="@drawable/badge_bg"
@@ -66,19 +67,6 @@
                 android:fontFamily="sans-serif-medium"
                 android:visibility="gone"
                 android:text="0" />
-
-            <!-- Close button -->
-            <ImageButton
-                android:id="@+id/btn_close"
-                android:layout_width="30dp"
-                android:layout_height="30dp"
-                android:layout_alignParentEnd="true"
-                android:layout_centerVertical="true"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:src="@android:drawable/ic_menu_close_clear_cancel"
-                android:contentDescription="Close copilot"
-                android:padding="5dp"
-                android:scaleType="fitCenter" />
         </RelativeLayout>
 
         <!-- ── Row 2: Feature action buttons ── -->

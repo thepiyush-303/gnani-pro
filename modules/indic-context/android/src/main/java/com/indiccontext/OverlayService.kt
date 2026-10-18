@@ -161,14 +161,26 @@ class OverlayService : Service() {
 
             // Drag handle
             val dragHandle = view.findViewById<View>(R.id.drag_handle)
-            var dY = 0; var iY = 0f
+            var dY = 0
+            var iY = 0f
             dragHandle?.setOnTouchListener { _, ev ->
                 when (ev.action) {
-                    MotionEvent.ACTION_DOWN -> { dY = currentParams?.y ?: 0; iY = ev.rawY; true }
+                    MotionEvent.ACTION_DOWN -> {
+                        dY = currentParams?.y ?: 0
+                        iY = ev.rawY
+                        true
+                    }
                     MotionEvent.ACTION_MOVE -> {
                         val ny = (dY + (ev.rawY - iY).toInt()).coerceIn(0, screenH - overlayH)
-                        currentParams?.let { p -> p.y = ny; lastTargetY = ny
-                            try { wm.updateViewLayout(view, p) } catch (_: Exception) {} }
+                        currentParams?.let { p ->
+                            p.y = ny
+                            lastTargetY = ny
+                            try {
+                                wm.updateViewLayout(view, p)
+                            } catch (e: Exception) {
+                                // View layout update failed
+                            }
+                        }
                         true
                     }
                     else -> false

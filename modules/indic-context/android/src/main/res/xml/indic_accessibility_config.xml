@@ -5,7 +5,7 @@
   - accessibilityEventTypes: We listen for content changes and scroll events
     to capture newly visible chat bubbles, plus focus events to track input fields.
   - canRetrieveWindowContent: REQUIRED to walk the node tree and read TextView text.
-  - notificationTimeout: 100ms — fast enough to capture messages as they appear.
+  - notificationTimeout: 100ms - fast enough to capture messages as they appear.
   - packageNames: Restricts the service to only these apps (performance + privacy).
 
   This file is copied into android/app/src/main/res/xml/ by the config plugin

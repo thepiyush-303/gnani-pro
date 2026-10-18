@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- overlay_bg.xml — Frosted dark card background -->
+<!-- overlay_bg.xml - Frosted dark card background -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <solid android:color="#F01E293B" />
