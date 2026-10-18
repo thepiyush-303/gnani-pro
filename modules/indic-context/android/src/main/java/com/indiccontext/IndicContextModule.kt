@@ -10,131 +10,151 @@ import androidx.core.content.ContextCompat
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
-import expo.modules.kotlin.records.Field
-import expo.modules.kotlin.records.Record
 
 /**
- * IndicContextModule — Phase 1 Scaffold
+ * IndicContextModule — Phase 2
  *
- * The React Native ↔ Kotlin bridge.
- * Exposed as the native module named "IndicContext" to TypeScript via
- * expo-modules-core. All @AsyncFunction calls run on Expo's background thread.
- *
- * ## Registered Functions (Phase 1)
- * - checkPermissions()    → PermissionStatusRecord
- * - requestMicrophonePermission()
- * - startOverlay()
- * - stopOverlay()
- * - getSessionBuffer()    → List<Map>
- * - injectText(text)
- * - readInputFieldText()  → String
- *
- * ## Events Emitted (wired up in Phase 2)
- * - onBufferUpdated
- * - onInputFieldFocused
- * - onInputFieldBlurred
+ * Phase 2 additions:
+ * - Module instance kept in companion so [ChatAccessibilityService] can call
+ *   emit* without a service binding.
+ * - [emitBufferUpdated] → fires "onBufferUpdated" to JS with full buffer snapshot.
+ * - [emitInputFocused]  → fires "onInputFieldFocused" to JS.
+ * - [emitInputBlurred]  → fires "onInputFieldBlurred" to JS.
+ * - [injectText]        → real ACTION_SET_TEXT + clipboard fallback.
  */
 class IndicContextModule : Module() {
 
     private val ctx: Context
-        get() = requireNotNull(appContext.reactContext) { "ReactContext is null" }
+        get() = requireNotNull(appContext.reactContext) { "ReactContext null" }
+
+    companion object {
+        @Volatile
+        var instance: IndicContextModule? = null
+            private set
+    }
 
     override fun definition() = ModuleDefinition {
 
         Name("IndicContext")
 
-        // Declare the events this module can emit to JavaScript
-        Events("onBufferUpdated", "onInputFieldFocused", "onInputFieldBlurred")
+        OnCreate { IndicContextModule.instance = this@IndicContextModule }
+        OnDestroy { IndicContextModule.instance = null }
 
-        // ───────────────────────────────────────────────────────────────
-        // Permissions
-        // ───────────────────────────────────────────────────────────────
+        Events(
+            "onBufferUpdated",
+            "onInputFieldFocused",
+            "onInputFieldBlurred",
+        )
+
+        // ── Permissions ───────────────────────────────────────────
 
         AsyncFunction("checkPermissions") {
-            val overlayGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                Settings.canDrawOverlays(ctx)
-            } else true
-
-            val accessibilityGranted = ChatAccessibilityService.instance != null
-
-            val micGranted = ContextCompat.checkSelfPermission(
+            val overlayOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                Settings.canDrawOverlays(ctx) else true
+            val a11yOk = ChatAccessibilityService.instance != null
+            val micOk = ContextCompat.checkSelfPermission(
                 ctx, Manifest.permission.RECORD_AUDIO
             ) == PackageManager.PERMISSION_GRANTED
 
             mapOf(
-                "overlay" to if (overlayGranted) "granted" else "denied",
-                "accessibility" to if (accessibilityGranted) "granted" else "denied",
-                "microphone" to if (micGranted) "granted" else "denied",
+                "overlay"       to if (overlayOk) "granted" else "denied",
+                "accessibility" to if (a11yOk)    "granted" else "denied",
+                "microphone"    to if (micOk)     "granted" else "denied",
             )
         }
 
         AsyncFunction("requestMicrophonePermission") { promise: Promise ->
-            // expo-modules-core handles runtime permission requests via appContext.
-            // For a full implementation, we use the permissions API.
-            // Phase 1 stub: the dashboard screen uses Linking to open settings as fallback.
+            // Runtime permission requires Activity context; dashboard falls back to Linking.openSettings
             promise.resolve(null)
         }
 
-        // ───────────────────────────────────────────────────────────────
-        // Overlay control
-        // ───────────────────────────────────────────────────────────────
+        // ── Overlay control ───────────────────────────────────────
 
         AsyncFunction("startOverlay") {
-            val canDraw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                Settings.canDrawOverlays(ctx)
-            } else true
-
-            if (!canDraw) {
-                throw Exception("SYSTEM_ALERT_WINDOW permission not granted. Cannot start overlay.")
-            }
+            val canDraw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                Settings.canDrawOverlays(ctx) else true
+            if (!canDraw) throw Exception("SYSTEM_ALERT_WINDOW permission not granted.")
 
             val intent = Intent(ctx, OverlayService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 ctx.startForegroundService(intent)
-            } else {
+            else
                 ctx.startService(intent)
-            }
             null
         }
 
         AsyncFunction("stopOverlay") {
-            val intent = Intent(ctx, OverlayService::class.java)
-            ctx.stopService(intent)
+            ctx.stopService(Intent(ctx, OverlayService::class.java))
             null
         }
 
-        // ───────────────────────────────────────────────────────────────
-        // Session buffer
-        // ───────────────────────────────────────────────────────────────
+        // ── Session buffer ────────────────────────────────────────
 
         AsyncFunction("getSessionBuffer") {
-            val service = ChatAccessibilityService.instance
-                ?: return@AsyncFunction emptyList<Map<String, Any?>>()
-
-            service.getBuffer().map { bubble ->
+            (ChatAccessibilityService.instance?.getBuffer() ?: emptyList()).map { b ->
                 mapOf(
-                    "text" to bubble.text,
-                    "isSelf" to bubble.isSelf,
-                    "capturedAtMs" to bubble.capturedAtMs,
-                    "nodeClassName" to bubble.nodeClassName,
-                    "appPackage" to bubble.appPackage,
+                    "text"          to b.text,
+                    "isSelf"        to b.isSelf,
+                    "capturedAtMs"  to b.capturedAtMs,
+                    "nodeClassName" to b.nodeClassName,
+                    "appPackage"    to b.appPackage,
                 )
             }
         }
 
-        // ───────────────────────────────────────────────────────────────
-        // Text injection
-        // ───────────────────────────────────────────────────────────────
+        // ── Text injection (Phase 2) ──────────────────────────────
 
         AsyncFunction("injectText") { text: String ->
-            val service = ChatAccessibilityService.instance
-                ?: throw Exception("AccessibilityService not connected. Enable it in Accessibility Settings.")
-            val ok = service.injectText(text)
-            if (!ok) throw Exception("Text injection failed: no focused input field detected.")
+            val svc = ChatAccessibilityService.instance
+                ?: throw Exception("AccessibilityService not connected.")
+            val ok = svc.injectText(text)
+            if (!ok) throw Exception("Text injection failed — no focused input field.")
+            null
         }
 
         AsyncFunction("readInputFieldText") {
             ChatAccessibilityService.instance?.readInputFieldText() ?: ""
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // Emit helpers — called by ChatAccessibilityService on main thread
+    // ───────────────────────────────────────────────────────────────
+
+    fun emitBufferUpdated(snapshot: List<ChatBubble>) {
+        try {
+            sendEvent(
+                "onBufferUpdated",
+                mapOf(
+                    "buffer" to snapshot.map { b ->
+                        mapOf(
+                            "text"          to b.text,
+                            "isSelf"        to b.isSelf,
+                            "capturedAtMs"  to b.capturedAtMs,
+                            "nodeClassName" to b.nodeClassName,
+                            "appPackage"    to b.appPackage,
+                        )
+                    }
+                )
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("IndicContextModule", "emitBufferUpdated: ${e.message}")
+        }
+    }
+
+    fun emitInputFocused(appPackage: String, currentText: String) {
+        try {
+            sendEvent("onInputFieldFocused", mapOf("appPackage" to appPackage, "text" to currentText))
+        } catch (e: Exception) {
+            android.util.Log.w("IndicContextModule", "emitInputFocused: ${e.message}")
+        }
+    }
+
+    fun emitInputBlurred(appPackage: String) {
+        try {
+            sendEvent("onInputFieldBlurred", mapOf("appPackage" to appPackage, "text" to ""))
+        } catch (e: Exception) {
+            android.util.Log.w("IndicContextModule", "emitInputBlurred: ${e.message}")
         }
     }
 }

@@ -77,6 +77,28 @@ export default function DashboardScreen() {
     microphone: 'unknown',
   });
 
+  // Phase 2: live context buffer state
+  const [bufferCount, setBufferCount] = useState(0);
+  const [activeApp, setActiveApp] = useState<string | null>(null);
+
+  // Subscribe to Phase 2 native events
+  useEffect(() => {
+    const bufferSub = IndicContext.addBufferListener(({ buffer }) => {
+      setBufferCount(buffer.length);
+    });
+    const focusSub = IndicContext.addInputFocusListener(({ appPackage }) => {
+      setActiveApp(appPackage.split('.').pop() ?? appPackage);
+    });
+    const blurSub = IndicContext.addInputBlurListener(() => {
+      setActiveApp(null);
+    });
+    return () => {
+      bufferSub.remove();
+      focusSub.remove();
+      blurSub.remove();
+    };
+  }, []);
+
   // ── Check all permission states ──
   const checkPermissions = useCallback(async () => {
     try {
@@ -199,7 +221,9 @@ export default function DashboardScreen() {
             </Text>
             <Text style={styles.toggleDesc}>
               {copilotEnabled
-                ? 'Floating overlay will appear in supported chat apps.'
+                ? activeApp
+                  ? `Typing in ${activeApp} — toolbar ready above keyboard.`
+                  : 'Tap any chat input in WhatsApp or Telegram.'
                 : 'Enable to launch the floating overlay over your keyboard.'}
             </Text>
           </View>
@@ -211,6 +235,13 @@ export default function DashboardScreen() {
             thumbColor={copilotEnabled ? '#FFFFFF' : '#94A3B8'}
           />
         </View>
+        {copilotEnabled && bufferCount > 0 && (
+          <View style={styles.bufferBadgeRow}>
+            <View style={styles.bufferBadge}>
+              <Text style={styles.bufferBadgeText}>📋 {bufferCount} context messages captured</Text>
+            </View>
+          </View>
+        )}
       </View>
 
       {/* ── Permissions Section ── */}
@@ -364,4 +395,16 @@ const styles = StyleSheet.create({
   debugCard: { borderColor: '#854D0E', borderWidth: 1 },
   debugTitle: { fontSize: 11, color: '#F59E0B', fontWeight: '700', marginBottom: 8 },
   debugText: { fontSize: 10, color: '#94A3B8', fontFamily: 'monospace' },
+
+  // Phase 2 buffer badge
+  bufferBadgeRow: { marginTop: 10, alignItems: 'flex-start' },
+  bufferBadge: {
+    backgroundColor: '#1E3A5F',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+  },
+  bufferBadgeText: { fontSize: 11, color: '#93C5FD', fontWeight: '500' },
 });

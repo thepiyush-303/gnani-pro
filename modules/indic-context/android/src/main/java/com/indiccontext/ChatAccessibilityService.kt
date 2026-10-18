@@ -2,7 +2,12 @@ package com.indiccontext
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Rect
+import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -10,33 +15,57 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
- * ChatAccessibilityService
+ * ChatAccessibilityService — Phase 2
  *
- * Responsibilities:
- * 1. Captures visible chat bubble [TextView] nodes from supported messaging apps into [SessionBuffer].
- * 2. Detects when an input field (EditText) is active in WhatsApp/Telegram to auto-show the copilot overlay.
- * 3. Detects when the user leaves the chat or switches apps to auto-hide the overlay immediately.
+ * Anti-flicker design:
+ * - App-switch detection uses a stable [foregroundPkg] tracker updated ONLY on
+ *   TYPE_WINDOW_STATE_CHANGED. This prevents false hide/show from keyboard packages.
+ * - Overlay show is triggered ONLY on TYPE_VIEW_FOCUSED when the source node is an EditText.
+ * - TYPE_WINDOW_CONTENT_CHANGED only triggers buffer capture + debounced badge update.
+ *   It does NOT call showOverlay() to avoid WindowManager thrash on every keystroke.
+ * - KEYBOARD_SUBSTRINGS: packages matching these strings are completely ignored so
+ *   the keyboard sliding in/out does not change [foregroundPkg].
+ *
+ * Phase 2 additions:
+ * - Real text injection via ACTION_SET_TEXT + clipboard fallback.
+ * - Real buffer events emitted to JS via [IndicContextModule.emitBufferUpdated].
+ * - Badge count updates on [OverlayService.contextMessageCount].
  */
 class ChatAccessibilityService : AccessibilityService() {
 
     private val buffer = SessionBuffer()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
-    private val debounceHandler = Handler(Looper.getMainLooper())
-    private var debounceRunnable: Runnable? = null
-    private val DEBOUNCE_MS = 500L
+    // Buffer debounce — emit to JS at most once per 800ms
+    private var bufferDebounce: Runnable? = null
+    private val BUFFER_DEBOUNCE_MS = 800L
 
-    /** The currently focused EditText node (for text injection). Nullable. */
+    // State
+    private var foregroundPkg: String? = null
+    private var inputFocused = false
+    private val inputBoundsRect = Rect()
     private var focusedInputNode: AccessibilityNodeInfo? = null
 
     companion object {
-        private const val TAG = "ChatAccessibility"
+        private const val TAG = "ChatA11y"
 
-        /** The set of package names whose content we actively parse. */
         val SUPPORTED_PACKAGES = setOf(
             "com.whatsapp",
-            "com.whatsapp.w4b",        // WhatsApp Business
+            "com.whatsapp.w4b",
             "org.telegram.messenger",
             "org.telegram.messenger.web",
+        )
+
+        /**
+         * Substrings that identify soft-keyboard packages.
+         * Events from these are completely ignored so the keyboard slide-in/out
+         * does not corrupt [foregroundPkg] or trigger spurious hide calls.
+         */
+        private val KEYBOARD_SUBSTRINGS = listOf(
+            "inputmethod", "keyboard", "ime.",
+            "gboard", "swiftkey", "honeyboard", "fleksy",
+            "samsung.android.server", "google.android.tts",
+            "asus.inputmethod",
         )
 
         @Volatile
@@ -52,232 +81,241 @@ class ChatAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
 
-        // Configure dynamically without package restrictions so we can detect window transitions
         val info = AccessibilityServiceInfo().apply {
-            eventTypes = AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
-                AccessibilityEvent.TYPE_VIEW_SCROLLED or
+            eventTypes =
                 AccessibilityEvent.TYPE_VIEW_FOCUSED or
                 AccessibilityEvent.TYPE_VIEW_CLICKED or
-                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
+                AccessibilityEvent.TYPE_VIEW_SCROLLED
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
             flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
                 AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
             notificationTimeout = 100
+            // No packageNames filter: we need WINDOW_STATE_CHANGED from any app
+            // to reliably detect navigation away from WhatsApp/Telegram.
         }
         serviceInfo = info
-
-        Log.i(TAG, "ChatAccessibilityService connected.")
+        Log.i(TAG, "Connected.")
     }
 
     override fun onDestroy() {
         super.onDestroy()
         instance = null
-        debounceHandler.removeCallbacks(debounceRunnable ?: return)
+        mainHandler.removeCallbacksAndMessages(null)
         buffer.clear()
-        focusedInputNode?.recycle()
-        focusedInputNode = null
-        Log.i(TAG, "ChatAccessibilityService destroyed. Buffer cleared.")
+        clearFocusedNode()
+        Log.i(TAG, "Destroyed.")
     }
 
     override fun onInterrupt() {
-        Log.w(TAG, "ChatAccessibilityService interrupted. Will reconnect automatically.")
+        Log.w(TAG, "Interrupted.")
     }
 
     // ───────────────────────────────────────────────────────────────
-    // Event handling
+    // Package helpers
     // ───────────────────────────────────────────────────────────────
 
-    private fun isKeyboardPackage(pkg: String): Boolean {
-        val p = pkg.lowercase()
-        return p.contains("inputmethod") || p.contains("keyboard") ||
-            p.contains("honeyboard") || p.contains("swiftkey") ||
-            p.contains("fleksy") || p.contains("gboard")
+    private fun isKeyboard(pkg: String): Boolean {
+        val lc = pkg.lowercase()
+        return KEYBOARD_SUBSTRINGS.any { lc.contains(it) }
     }
+
+    private fun isOurApp(pkg: String) = pkg == "com.indiccontext.assistant"
+    private fun isSystemUi(pkg: String) =
+        pkg.startsWith("com.android.systemui") || pkg.startsWith("com.android.launcher")
+
+    // ───────────────────────────────────────────────────────────────
+    // Event routing
+    // ───────────────────────────────────────────────────────────────
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val event = event ?: return
         val pkg = event.packageName?.toString() ?: return
 
-        // 1. If active package is NOT a supported chat app and NOT a soft keyboard:
-        // User is on home screen, launcher, settings, or another app -> hide overlay immediately!
-        if (pkg !in SUPPORTED_PACKAGES && !isKeyboardPackage(pkg)) {
-            OverlayService.instance?.hideOverlay()
-            focusedInputNode?.recycle()
-            focusedInputNode = null
-            return
-        }
-
-        // Ignore keyboard package events
-        if (isKeyboardPackage(pkg)) {
-            return
-        }
-
-        // 2. We are in a supported chat app (e.g. WhatsApp, Telegram)
-        buffer.resetIfAppChanged(pkg)
+        // Completely ignore keyboard, system UI, and our own app events
+        if (isKeyboard(pkg) || isSystemUi(pkg) || isOurApp(pkg)) return
 
         when (event.eventType) {
-            AccessibilityEvent.TYPE_VIEW_FOCUSED,
-            AccessibilityEvent.TYPE_VIEW_CLICKED -> {
-                val source = event.source ?: return
-                val isInput = source.className?.contains("EditText", ignoreCase = true) == true
-                if (isInput) {
-                    focusedInputNode?.recycle()
-                    focusedInputNode = source
-                    Log.d(TAG, "Input field focused/clicked in $pkg")
 
-                    val rect = Rect()
-                    source.getBoundsInScreen(rect)
-                    OverlayService.instance?.showOverlay(rect)
-                } else if (event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
-                    // Clicking outside the input field in chat -> hide overlay
-                    OverlayService.instance?.hideOverlay()
-                }
-            }
-
-            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
-                // If overlay is showing, adjust docked position if input field moved (e.g. keyboard opened)
-                if (OverlayService.instance?.isShowing() == true) {
-                    focusedInputNode?.let { node ->
-                        try {
-                            val rect = Rect()
-                            node.getBoundsInScreen(rect)
-                            if (rect.top > 0) {
-                                OverlayService.instance?.showOverlay(rect)
-                            }
-                        } catch (e: Exception) {
-                            // Node might be unsealed
-                        }
-                    }
-                }
-
-                val root = rootInActiveWindow ?: return
-                try {
-                    val added = walkAndCapture(root, pkg)
-                    if (added > 0) scheduleBufferEvent()
-                } finally {
-                    root.recycle()
-                }
-            }
-
-            AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
-                val root = rootInActiveWindow ?: return
-                try {
-                    val added = walkAndCapture(root, pkg)
-                    if (added > 0) scheduleBufferEvent()
-                } finally {
-                    root.recycle()
-                }
-            }
-
+            // ── Reliable foreground-app transition signal ─────────────
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                // Check if active window is still a chat window with an input field
-                val root = rootInActiveWindow
-                if (root != null) {
-                    try {
-                        val hasInput = findEditText(root)
-                        if (!hasInput) {
-                            OverlayService.instance?.hideOverlay()
-                            focusedInputNode?.recycle()
-                            focusedInputNode = null
-                        }
-                    } finally {
-                        root.recycle()
-                    }
+                if (pkg == foregroundPkg) return
+                Log.d(TAG, "Foreground: $foregroundPkg → $pkg")
+                foregroundPkg = pkg
+
+                if (pkg !in SUPPORTED_PACKAGES) {
+                    // Left WhatsApp / Telegram
+                    onLeftSupportedApp()
+                } else {
+                    buffer.resetIfAppChanged(pkg)
+                }
+            }
+
+            // ── Input focus: the ONE trigger for showing the overlay ──
+            AccessibilityEvent.TYPE_VIEW_FOCUSED -> {
+                if (pkg !in SUPPORTED_PACKAGES) return
+                val node = event.source ?: return
+                handleFocusEvent(node, pkg)
+            }
+
+            // ── Click: hide if user taps outside the input ────────────
+            AccessibilityEvent.TYPE_VIEW_CLICKED -> {
+                if (pkg !in SUPPORTED_PACKAGES) return
+                val node = event.source ?: return
+                val isEdit = node.className?.contains("EditText", true) == true
+                if (!isEdit && inputFocused) {
+                    onInputLostFocus()
+                } else if (isEdit) {
+                    // Re-read bounds in case user tapped a different edit field
+                    handleFocusEvent(node, pkg)
+                    return  // handleFocusEvent already recycles or retains node
+                }
+                node.recycle()
+            }
+
+            // ── Content change: capture bubbles only ─────────────────
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
+                if (pkg !in SUPPORTED_PACKAGES) return
+                val root = rootInActiveWindow ?: return
+                try {
+                    val added = walkAndCapture(root, pkg)
+                    if (added > 0) scheduleBufferEvent()
+                } finally {
+                    root.recycle()
                 }
             }
         }
-    }
-
-    private fun findEditText(root: AccessibilityNodeInfo): Boolean {
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        queue.add(root)
-        while (queue.isNotEmpty()) {
-            val node = queue.removeFirst()
-            if (node.className?.contains("EditText", ignoreCase = true) == true) {
-                if (node !== root) node.recycle()
-                return true
-            }
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { queue.add(it) }
-            }
-            if (node !== root) node.recycle()
-        }
-        return false
     }
 
     // ───────────────────────────────────────────────────────────────
-    // Node-tree walker
+    // Focus logic
+    // ───────────────────────────────────────────────────────────────
+
+    private fun handleFocusEvent(node: AccessibilityNodeInfo, pkg: String) {
+        val isEdit = node.className?.contains("EditText", true) == true
+        if (!isEdit) {
+            node.recycle()
+            return
+        }
+
+        clearFocusedNode()
+        focusedInputNode = node   // retain; do NOT recycle
+        inputFocused = true
+
+        node.getBoundsInScreen(inputBoundsRect)
+        Log.d(TAG, "EditText focused in $pkg bounds=$inputBoundsRect")
+
+        OverlayService.instance?.showOverlay(Rect(inputBoundsRect))
+
+        val text = node.text?.toString() ?: ""
+        IndicContextModule.instance?.emitInputFocused(pkg, text)
+    }
+
+    private fun onInputLostFocus() {
+        inputFocused = false
+        clearFocusedNode()
+        OverlayService.instance?.hideOverlay()
+        IndicContextModule.instance?.emitInputBlurred(foregroundPkg ?: "")
+    }
+
+    private fun onLeftSupportedApp() {
+        inputFocused = false
+        clearFocusedNode()
+        OverlayService.instance?.hideOverlay()
+    }
+
+    private fun clearFocusedNode() {
+        try { focusedInputNode?.recycle() } catch (_: Exception) {}
+        focusedInputNode = null
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // Buffer capture
     // ───────────────────────────────────────────────────────────────
 
     private fun walkAndCapture(root: AccessibilityNodeInfo, pkg: String): Int {
-        var addedCount = 0
+        var added = 0
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
-
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
-
             val text = node.text?.toString()
-            val className = node.className?.toString() ?: ""
-
-            // Generic heuristic: a non-empty TextView child of a scrollable container
-            if (
-                text != null &&
-                text.isNotBlank() &&
-                className.endsWith("TextView") &&
-                text.length > 1
-            ) {
+            val cls = node.className?.toString() ?: ""
+            if (text != null && text.isNotBlank() && cls.endsWith("TextView") && text.length > 1) {
                 val bubble = ChatBubble(
                     text = text.trim(),
                     isSelf = null,
-                    nodeClassName = className,
+                    nodeClassName = cls,
                     appPackage = pkg,
                 )
-                val added = buffer.add(bubble)
-                if (added) addedCount++
+                if (buffer.add(bubble)) added++
             }
-
-            // Enqueue children
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { queue.add(it) }
-            }
-
-            // Recycle intermediate nodes (not root — caller recycles that)
+            for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
             if (node !== root) node.recycle()
         }
-
-        return addedCount
+        return added
     }
 
     // ───────────────────────────────────────────────────────────────
-    // Public API (called by IndicContextModule)
+    // Buffer event → JS bridge (debounced)
+    // ───────────────────────────────────────────────────────────────
+
+    private fun scheduleBufferEvent() {
+        bufferDebounce?.let { mainHandler.removeCallbacks(it) }
+        val r = Runnable {
+            val snapshot = buffer.snapshot()
+            Log.d(TAG, "Emitting bufferUpdated [size=${snapshot.size}]")
+            OverlayService.instance?.contextMessageCount = snapshot.size
+            IndicContextModule.instance?.emitBufferUpdated(snapshot)
+        }
+        bufferDebounce = r
+        mainHandler.postDelayed(r, BUFFER_DEBOUNCE_MS)
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // Public API (IndicContextModule → JS bridge)
     // ───────────────────────────────────────────────────────────────
 
     fun getBuffer(): List<ChatBubble> = buffer.snapshot()
 
+    fun readInputFieldText(): String? = focusedInputNode?.text?.toString()
+
+    /**
+     * Injects [text] into the currently focused chat input.
+     *
+     * Strategy 1 (API 21+): ACTION_SET_TEXT — replaces the entire field content.
+     * Strategy 2 (fallback): clipboard + ACTION_PASTE — appends at cursor position.
+     */
     fun injectText(text: String): Boolean {
         val node = focusedInputNode ?: run {
             Log.w(TAG, "injectText: no focused input node")
             return false
         }
-        Log.i(TAG, "injectText (stub): '$text' into ${node.packageName}")
-        return true
-    }
 
-    fun readInputFieldText(): String? {
-        return focusedInputNode?.text?.toString()
-    }
-
-    // ───────────────────────────────────────────────────────────────
-    // Debounce bridge events
-    // ───────────────────────────────────────────────────────────────
-
-    private fun scheduleBufferEvent() {
-        debounceRunnable?.let { debounceHandler.removeCallbacks(it) }
-        val r = Runnable {
-            Log.d(TAG, "Buffer update scheduled [size=${buffer.size()}]")
+        // Strategy 1: ACTION_SET_TEXT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            val args = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            }
+            if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                Log.i(TAG, "injectText: ACTION_SET_TEXT succeeded")
+                return true
+            }
+            Log.w(TAG, "injectText: ACTION_SET_TEXT failed — trying clipboard")
         }
-        debounceRunnable = r
-        debounceHandler.postDelayed(r, DEBOUNCE_MS)
+
+        // Strategy 2: clipboard + ACTION_PASTE
+        return try {
+            val clip = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clip.setPrimaryClip(ClipData.newPlainText("copilot_inject", text))
+            val ok = node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            Log.i(TAG, "injectText: clipboard paste result=$ok")
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "injectText: clipboard fallback error", e)
+            false
+        }
     }
 }

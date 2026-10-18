@@ -1,83 +1,97 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  overlay_panel.xml — Phase 1 native overlay toolbar layout.
+  overlay_panel.xml — Phase 2 copilot toolbar
 
-  This is inflated by OverlayService and rendered above the stock keyboard
-  via WindowManager TYPE_APPLICATION_OVERLAY.
+  Full-width floating card with:
+  ┌────────────────────────────────────────────────────┐
+  │   ▬▬  drag handle             [12 ctx]  [✕]       │
+  │  🎤      🎨      ✅      ❄️                        │
+  │ Voice   Tone   Fact    Ice                         │
+  └────────────────────────────────────────────────────┘
 
-  Phase 1: Native Android views only (ImageButton toolbar + drag handle).
-  Phase 2+: This container will host a ReactRootView rendering the full
-             React Native OverlayPanel component.
-
-  Design:
-  ┌───────────────────────────────────────────────────────┐
-  │ ▒▒▒▒ (drag handle)                                 │
-  │  [🎤 Mic]  [🎨 Tone]  [❄️ Icebreaker]  [⋯ More]    │
-  └───────────────────────────────────────────────────────┘
+  The FrameLayout root is transparent and NOT clickable,
+  so touches outside the card pass through to WhatsApp/Telegram.
 -->
-<LinearLayout
+<FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/overlay_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:paddingStart="12dp"
-    android:paddingEnd="12dp"
-    android:paddingBottom="4dp">
+    android:clickable="false"
+    android:focusable="false">
 
-    <!-- Card container with background -->
+    <!-- Floating card with horizontal margins -->
     <LinearLayout
-        android:id="@+id/card_container"
+        android:id="@+id/overlay_card"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
+        android:layout_marginBottom="6dp"
         android:orientation="vertical"
         android:background="@drawable/overlay_bg"
-        android:paddingTop="6dp"
-        android:paddingBottom="6dp"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp">
+        android:elevation="10dp">
 
-        <!-- Header row: Drag handle & Close button -->
+        <!-- ── Row 1: drag handle + context badge + close ── -->
         <RelativeLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingBottom="4dp">
+            android:layout_height="30dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="8dp">
 
-            <!-- Drag handle in center -->
+            <!-- Drag handle centred -->
             <View
                 android:id="@+id/drag_handle"
-                android:layout_width="48dp"
-                android:layout_height="5dp"
+                android:layout_width="40dp"
+                android:layout_height="4dp"
                 android:layout_centerInParent="true"
-                android:background="#4DFFFFFF"
+                android:background="@drawable/drag_handle_bg"
                 android:clickable="true"
                 android:focusable="true" />
 
-            <!-- Close button on right -->
+            <!-- Context message count badge -->
+            <TextView
+                android:id="@+id/context_badge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_toStartOf="@+id/btn_close"
+                android:layout_centerVertical="true"
+                android:layout_marginEnd="4dp"
+                android:background="@drawable/badge_bg"
+                android:paddingStart="7dp"
+                android:paddingEnd="7dp"
+                android:paddingTop="1dp"
+                android:paddingBottom="1dp"
+                android:textColor="#FFFFFF"
+                android:textSize="9sp"
+                android:fontFamily="sans-serif-medium"
+                android:visibility="gone"
+                android:text="0" />
+
+            <!-- Close button -->
             <ImageButton
                 android:id="@+id/btn_close"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
                 android:layout_alignParentEnd="true"
                 android:layout_centerVertical="true"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_close_clear_cancel"
-                android:contentDescription="Close overlay"
-                android:padding="4dp"
+                android:contentDescription="Close copilot"
+                android:padding="5dp"
                 android:scaleType="fitCenter" />
         </RelativeLayout>
 
-        <!-- Actions row -->
+        <!-- ── Row 2: Feature action buttons ── -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:paddingBottom="2dp">
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:paddingBottom="10dp">
 
-            <!-- Mic button -->
+            <!-- Mic / Voice -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -86,23 +100,23 @@
                 android:gravity="center">
                 <ImageButton
                     android:id="@+id/btn_mic"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
-                    android:background="#1AFFFFFF"
+                    android:layout_width="46dp"
+                    android:layout_height="46dp"
+                    android:background="@drawable/btn_bg_mic"
                     android:src="@android:drawable/ic_btn_speak_now"
-                    android:padding="10dp"
+                    android:padding="11dp"
                     android:contentDescription="Voice to Text"
                     android:scaleType="fitCenter" />
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Voice"
-                    android:textColor="#B3FFFFFF"
-                    android:textSize="10sp"
-                    android:layout_marginTop="2dp" />
+                    android:textColor="#64748B"
+                    android:textSize="9sp"
+                    android:layout_marginTop="3dp" />
             </LinearLayout>
 
-            <!-- Tone button -->
+            <!-- Tone rewrite -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -111,23 +125,48 @@
                 android:gravity="center">
                 <ImageButton
                     android:id="@+id/btn_tone"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
-                    android:background="#1AFFFFFF"
+                    android:layout_width="46dp"
+                    android:layout_height="46dp"
+                    android:background="@drawable/btn_bg_tone"
                     android:src="@android:drawable/ic_menu_edit"
-                    android:padding="10dp"
-                    android:contentDescription="Tone and Rewrite"
+                    android:padding="11dp"
+                    android:contentDescription="Tone Rewrite"
                     android:scaleType="fitCenter" />
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Tone"
-                    android:textColor="#B3FFFFFF"
-                    android:textSize="10sp"
-                    android:layout_marginTop="2dp" />
+                    android:textColor="#64748B"
+                    android:textSize="9sp"
+                    android:layout_marginTop="3dp" />
             </LinearLayout>
 
-            <!-- Icebreaker button -->
+            <!-- Fact check -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center">
+                <ImageButton
+                    android:id="@+id/btn_factcheck"
+                    android:layout_width="46dp"
+                    android:layout_height="46dp"
+                    android:background="@drawable/btn_bg_factcheck"
+                    android:src="@android:drawable/ic_menu_info_details"
+                    android:padding="11dp"
+                    android:contentDescription="Fact Check"
+                    android:scaleType="fitCenter" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Fact"
+                    android:textColor="#64748B"
+                    android:textSize="9sp"
+                    android:layout_marginTop="3dp" />
+            </LinearLayout>
+
+            <!-- Icebreaker -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -136,24 +175,23 @@
                 android:gravity="center">
                 <ImageButton
                     android:id="@+id/btn_icebreaker"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
-                    android:background="#1AFFFFFF"
+                    android:layout_width="46dp"
+                    android:layout_height="46dp"
+                    android:background="@drawable/btn_bg_ice"
                     android:src="@android:drawable/star_on"
-                    android:padding="10dp"
-                    android:contentDescription="Icebreaker Suggestions"
+                    android:padding="11dp"
+                    android:contentDescription="Icebreaker"
                     android:scaleType="fitCenter" />
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Icebreaker"
-                    android:textColor="#B3FFFFFF"
-                    android:textSize="10sp"
-                    android:layout_marginTop="2dp" />
+                    android:text="Ice"
+                    android:textColor="#64748B"
+                    android:textSize="9sp"
+                    android:layout_marginTop="3dp" />
             </LinearLayout>
 
         </LinearLayout>
-
     </LinearLayout>
 
-</LinearLayout>
+</FrameLayout>
