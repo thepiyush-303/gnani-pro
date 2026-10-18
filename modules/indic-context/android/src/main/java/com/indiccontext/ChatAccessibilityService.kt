@@ -13,30 +13,33 @@ import android.os.Looper
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 
 /**
- * ChatAccessibilityService — Phase 2
+ * ChatAccessibilityService — Phase 3
  *
  * Anti-flicker design:
  * - App-switch detection uses a stable [foregroundPkg] tracker updated ONLY on
  *   TYPE_WINDOW_STATE_CHANGED. This prevents false hide/show from keyboard packages.
  * - Overlay show is triggered ONLY on TYPE_VIEW_FOCUSED when the source node is an EditText.
  * - TYPE_WINDOW_CONTENT_CHANGED only triggers buffer capture + debounced badge update.
- *   It does NOT call showOverlay() to avoid WindowManager thrash on every keystroke.
+ *   It does NOT call showToolbar() to avoid WindowManager thrash on every keystroke.
  * - KEYBOARD_SUBSTRINGS: packages matching these strings are completely ignored so
  *   the keyboard sliding in/out does not change [foregroundPkg].
  *
- * Phase 2 additions:
- * - Real text injection via ACTION_SET_TEXT + clipboard fallback.
- * - Real buffer events emitted to JS via [IndicContextModule.emitBufferUpdated].
- * - Badge count updates on [OverlayService.contextMessageCount].
+ * Phase 3 additions:
+ * - Dual-mode support: INPUT_BAR and EDGE_SLIDER.
+ * - In INPUT_BAR mode: toolbar shows only when EditText is focused; hides on blur/app-switch.
+ * - In EDGE_SLIDER mode: edge pill shown when supported app is in foreground; pill is removed
+ *   when user leaves the supported app. Toolbar expansion is handled inside OverlayService.
+ * - Instagram added to SUPPORTED_PACKAGES.
  */
 class ChatAccessibilityService : AccessibilityService() {
 
     private val buffer = SessionBuffer()
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // Buffer debounce — emit to JS at most once per 800ms
+    // Buffer debounce -- emit to JS at most once per 800ms
     private var bufferDebounce: Runnable? = null
     private val BUFFER_DEBOUNCE_MS = 800L
 
@@ -54,6 +57,7 @@ class ChatAccessibilityService : AccessibilityService() {
             "com.whatsapp.w4b",
             "org.telegram.messenger",
             "org.telegram.messenger.web",
+            "com.instagram.android",
         )
 
         /**
@@ -87,7 +91,8 @@ class ChatAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_VIEW_CLICKED or
                 AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
                 AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
-                AccessibilityEvent.TYPE_VIEW_SCROLLED
+                AccessibilityEvent.TYPE_VIEW_SCROLLED or
+                AccessibilityEvent.TYPE_WINDOWS_CHANGED
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
             flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
                 AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
@@ -105,6 +110,8 @@ class ChatAccessibilityService : AccessibilityService() {
         mainHandler.removeCallbacksAndMessages(null)
         buffer.clear()
         clearFocusedNode()
+        OverlayService.instance?.hideToolbar()
+        OverlayService.instance?.hideEdgePill()
         Log.i(TAG, "Destroyed.")
     }
 
@@ -140,15 +147,34 @@ class ChatAccessibilityService : AccessibilityService() {
 
             // ── Reliable foreground-app transition signal ─────────────
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                if (pkg == foregroundPkg) return
-                Log.d(TAG, "Foreground: $foregroundPkg → $pkg")
+                val prevPkg = foregroundPkg
                 foregroundPkg = pkg
 
                 if (pkg !in SUPPORTED_PACKAGES) {
-                    // Left WhatsApp / Telegram
+                    if (prevPkg in SUPPORTED_PACKAGES) {
+                        Log.d(TAG, "Left supported app ($prevPkg -> $pkg)")
+                    }
                     onLeftSupportedApp()
                 } else {
                     buffer.resetIfAppChanged(pkg)
+                    // If window changed within the supported app (e.g. backed out of chat to conversation list),
+                    // verify if an input field is actually still focused
+                    if (inputFocused && !isInputStillFocused()) {
+                        Log.d(TAG, "Input no longer focused after window state change in $pkg")
+                        onInputLostFocus()
+                    }
+                    // EDGE_SLIDER: show the pill whenever a supported app comes to foreground
+                    if (OverlayService.currentMode == OverlayMode.EDGE_SLIDER) {
+                        OverlayService.instance?.showEdgePill()
+                    }
+                }
+            }
+
+            // ── Window hierarchy changed: check if keyboard closed ────
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
+                if (pkg in SUPPORTED_PACKAGES && inputFocused && !isKeyboardVisible()) {
+                    Log.d(TAG, "Keyboard dismissed (TYPE_WINDOWS_CHANGED) in $pkg")
+                    onInputLostFocus()
                 }
             }
 
@@ -193,6 +219,28 @@ class ChatAccessibilityService : AccessibilityService() {
     // Focus logic
     // ───────────────────────────────────────────────────────────────
 
+    private fun isKeyboardVisible(): Boolean {
+        return try {
+            windows?.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD } == true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun isInputStillFocused(): Boolean {
+        val root = rootInActiveWindow ?: return false
+        return try {
+            val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            val isEdit = focused?.className?.contains("EditText", true) == true
+            focused?.recycle()
+            isEdit
+        } catch (e: Exception) {
+            false
+        } finally {
+            root.recycle()
+        }
+    }
+
     private fun handleFocusEvent(node: AccessibilityNodeInfo, pkg: String) {
         val isEdit = node.className?.contains("EditText", true) == true
         if (!isEdit) {
@@ -207,7 +255,11 @@ class ChatAccessibilityService : AccessibilityService() {
         node.getBoundsInScreen(inputBoundsRect)
         Log.d(TAG, "EditText focused in $pkg bounds=$inputBoundsRect")
 
-        OverlayService.instance?.showOverlay(Rect(inputBoundsRect))
+        // INPUT_BAR: show toolbar above keyboard when input is focused
+        // EDGE_SLIDER: pill is already shown; toolbar expansion is handled by pill tap
+        if (OverlayService.currentMode == OverlayMode.INPUT_BAR) {
+            OverlayService.instance?.showToolbar(Rect(inputBoundsRect))
+        }
 
         val text = node.text?.toString() ?: ""
         IndicContextModule.instance?.emitInputFocused(pkg, text)
@@ -216,14 +268,18 @@ class ChatAccessibilityService : AccessibilityService() {
     private fun onInputLostFocus() {
         inputFocused = false
         clearFocusedNode()
-        OverlayService.instance?.hideOverlay()
+        // Only hide the toolbar in INPUT_BAR mode; EDGE_SLIDER pill stays visible
+        if (OverlayService.currentMode == OverlayMode.INPUT_BAR) {
+            OverlayService.instance?.hideToolbar()
+        }
         IndicContextModule.instance?.emitInputBlurred(foregroundPkg ?: "")
     }
 
     private fun onLeftSupportedApp() {
         inputFocused = false
         clearFocusedNode()
-        OverlayService.instance?.hideOverlay()
+        OverlayService.instance?.hideToolbar()
+        OverlayService.instance?.hideEdgePill()
     }
 
     private fun clearFocusedNode() {

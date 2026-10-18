@@ -70,12 +70,14 @@ class IndicContextModule : Module() {
 
         // ── Overlay control ───────────────────────────────────────
 
-        AsyncFunction("startOverlay") {
+        AsyncFunction("startOverlay") { mode: String ->
             val canDraw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
                 Settings.canDrawOverlays(ctx) else true
             if (!canDraw) throw Exception("SYSTEM_ALERT_WINDOW permission not granted.")
 
-            val intent = Intent(ctx, OverlayService::class.java)
+            val intent = Intent(ctx, OverlayService::class.java).apply {
+                putExtra("mode", mode)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 ctx.startForegroundService(intent)
             else
@@ -85,6 +87,14 @@ class IndicContextModule : Module() {
 
         AsyncFunction("stopOverlay") {
             ctx.stopService(Intent(ctx, OverlayService::class.java))
+            Unit
+        }
+
+        AsyncFunction("setOverlayMode") { mode: String ->
+            OverlayService.instance?.setMode(OverlayMode.from(mode)) ?: run {
+                // Service not running yet — just update the static currentMode
+                OverlayService.currentMode = OverlayMode.from(mode)
+            }
             Unit
         }
 

@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import IndicContext from 'indic-context';
+import IndicContext, { type OverlayMode } from 'indic-context';
 
 // ─────────────────────────────────────────────
 // Types
@@ -71,6 +71,7 @@ function PermissionRow({
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const [copilotEnabled, setCopilotEnabled] = useState(false);
+  const [overlayMode, setOverlayMode] = useState<OverlayMode>('INPUT_BAR');
   const [permissions, setPermissions] = useState<PermissionState>({
     overlay: 'unknown',
     accessibility: 'unknown',
@@ -116,6 +117,21 @@ export default function DashboardScreen() {
     return () => clearInterval(interval);
   }, [checkPermissions]);
 
+  // ── Mode change handler ──
+  const handleModeChange = useCallback(
+    async (mode: OverlayMode) => {
+      setOverlayMode(mode);
+      if (copilotEnabled) {
+        try {
+          await IndicContext.setOverlayMode(mode);
+        } catch (e: any) {
+          console.warn('[Dashboard] setOverlayMode error:', e);
+        }
+      }
+    },
+    [copilotEnabled],
+  );
+
   // ── Copilot toggle ──
   const handleCopilotToggle = useCallback(
     async (value: boolean) => {
@@ -134,7 +150,7 @@ export default function DashboardScreen() {
 
       try {
         if (value) {
-          await IndicContext.startOverlay();
+          await IndicContext.startOverlay(overlayMode);
         } else {
           await IndicContext.stopOverlay();
         }
@@ -144,7 +160,7 @@ export default function DashboardScreen() {
         Alert.alert('Error', `Failed to toggle the copilot: ${e?.message || e}`);
       }
     },
-    [permissions],
+    [permissions, overlayMode],
   );
 
   // ── Grant handlers ──
@@ -242,6 +258,68 @@ export default function DashboardScreen() {
             </View>
           </View>
         )}
+      </View>
+
+      {/* ── Overlay Behaviour Mode ── */}
+      <Text style={styles.sectionHeader}>Overlay Mode</Text>
+      <View style={styles.modeContainer}>
+        {/* Mode A: Input Bar */}
+        <TouchableOpacity
+          style={[
+            styles.modeCard,
+            overlayMode === 'INPUT_BAR' && styles.modeCardActive,
+          ]}
+          onPress={() => handleModeChange('INPUT_BAR')}
+          activeOpacity={0.8}
+        >
+          <View style={styles.modeCardHeader}>
+            <Text style={styles.modeIcon}>⌨️</Text>
+            <View style={styles.modeCardTitleCol}>
+              <Text style={styles.modeTitle}>Input Bar Mode</Text>
+              <Text style={styles.modeSub}>Appears only when typing</Text>
+            </View>
+            <View
+              style={[
+                styles.radioCircle,
+                overlayMode === 'INPUT_BAR' && styles.radioCircleActive,
+              ]}
+            >
+              {overlayMode === 'INPUT_BAR' && <View style={styles.radioDot} />}
+            </View>
+          </View>
+          <Text style={styles.modeDescription}>
+            Opens directly above your keyboard when an input field is tapped. Automatically closes when you finish typing, close the keyboard, or exit chat.
+          </Text>
+        </TouchableOpacity>
+
+        {/* Mode B: Edge Slider */}
+        <TouchableOpacity
+          style={[
+            styles.modeCard,
+            overlayMode === 'EDGE_SLIDER' && styles.modeCardActive,
+          ]}
+          onPress={() => handleModeChange('EDGE_SLIDER')}
+          activeOpacity={0.8}
+        >
+          <View style={styles.modeCardHeader}>
+            <Text style={styles.modeIcon}>🎛️</Text>
+            <View style={styles.modeCardTitleCol}>
+              <Text style={styles.modeTitle}>Edge Slider Mode</Text>
+              <Text style={styles.modeSub}>Subtle pill docked to edge</Text>
+            </View>
+            <View
+              style={[
+                styles.radioCircle,
+                overlayMode === 'EDGE_SLIDER' && styles.radioCircleActive,
+              ]}
+            >
+              {overlayMode === 'EDGE_SLIDER' && <View style={styles.radioDot} />}
+            </View>
+          </View>
+          <Text style={styles.modeDescription}>
+            Stays faded on the screen edge in WhatsApp, Telegram &amp; Instagram. Tap the pill to expand the AI assistant anytime; tap ✕ to collapse.
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* ── Permissions Section ── */}
@@ -407,4 +485,63 @@ const styles = StyleSheet.create({
     borderColor: '#3B82F6',
   },
   bufferBadgeText: { fontSize: 11, color: '#93C5FD', fontWeight: '500' },
+
+  // Mode Selection
+  modeContainer: { gap: 12, marginBottom: 16 },
+  modeCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1.5,
+    borderColor: '#334155',
+  },
+  modeCardActive: {
+    borderColor: '#6366F1',
+    backgroundColor: '#182038',
+  },
+  modeCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modeIcon: {
+    fontSize: 22,
+    marginRight: 10,
+  },
+  modeCardTitleCol: {
+    flex: 1,
+  },
+  modeTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#F8FAFC',
+  },
+  modeSub: {
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 1,
+  },
+  radioCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#64748B',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioCircleActive: {
+    borderColor: '#6366F1',
+  },
+  radioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#6366F1',
+  },
+  modeDescription: {
+    fontSize: 12,
+    color: '#94A3B8',
+    lineHeight: 18,
+  },
 });

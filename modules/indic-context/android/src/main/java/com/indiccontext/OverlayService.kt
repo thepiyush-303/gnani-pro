@@ -23,30 +23,58 @@ import android.widget.TextView
 import android.widget.Toast
 
 /**
- * OverlayService — Phase 2
+ * OverlayService — Phase 3
  *
- * Anti-flicker design:
- * - Overlay is shown ONLY when ChatAccessibilityService calls showOverlay().
- * - Position updates are debounced: small movements (< THRESHOLD) are ignored;
- *   valid moves are coalesced into at most one WindowManager call per 60ms.
- * - hideOverlay() is idempotent and cancels any pending position update.
- * - All WindowManager calls happen on the main thread via mainHandler.post {}.
+ * Supports two modes selectable from the dashboard:
+ *
+ * INPUT_BAR mode (default):
+ *   - The toolbar is completely hidden until [ChatAccessibilityService] detects
+ *     that an EditText inside a supported chat app gained focus (keyboard opened).
+ *   - [showToolbar] is called with the input field's on-screen bounds so the
+ *     toolbar can dock directly above the keyboard.
+ *   - The toolbar is immediately hidden when:
+ *       • The input field loses focus ([hideToolbar]).
+ *       • The user leaves the supported app ([hideToolbar]).
+ *       • The user taps the ✕ close button.
+ *   - The overlay view is completely REMOVED from WindowManager when hidden —
+ *     it is never just made invisible or moved off-screen.
+ *
+ * EDGE_SLIDER mode:
+ *   - A small faded pill is docked to the right edge of the screen whenever
+ *     a supported app is in the foreground ([showEdgePill]).
+ *   - Tapping the pill expands the full toolbar in place ([expandToToolbar]).
+ *   - The pill/toolbar is removed when the user leaves the supported app ([hideEdgePill]).
+ *   - The pill is at ~40% screen height (vertically centred-ish) and is
+ *     semi-transparent so it does not obscure content.
+ *
+ * Anti-flicker safeguards (preserved from Phase 2):
+ *   - Position updates debounced at 60ms / 10px threshold.
+ *   - All WindowManager calls dispatched onto the main thread.
+ *   - [hideToolbar] and [hideEdgePill] are idempotent.
  */
 class OverlayService : Service() {
 
+    // ── WindowManager state ───────────────────────────────────────────
     private var windowManager: WindowManager? = null
-    private var overlayView: View? = null
-    private var currentParams: WindowManager.LayoutParams? = null
-    private var isOverlayShowing = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // Position debounce
+    // INPUT_BAR state
+    private var toolbarView: View? = null
+    private var toolbarParams: WindowManager.LayoutParams? = null
+    private var isToolbarShowing = false
+
+    // Position debounce (INPUT_BAR)
     private var lastTargetY = -1
-    private val POSITION_THRESHOLD_PX = 10  // ignore moves smaller than 10px
-    private val POSITION_DEBOUNCE_MS = 60L  // max one layout update per 60ms
+    private val POSITION_THRESHOLD_PX = 10
+    private val POSITION_DEBOUNCE_MS = 60L
     private var pendingPositionUpdate: Runnable? = null
 
-    // Badge counter driven by ChatAccessibilityService
+    // EDGE_SLIDER state
+    private var edgeView: View? = null
+    private var isEdgeShowing = false
+    private var isEdgeExpanded = false
+
+    // ── Badge counter ─────────────────────────────────────────────────
     var contextMessageCount: Int = 0
         set(value) {
             field = value
@@ -59,16 +87,22 @@ class OverlayService : Service() {
         private const val NOTIF_ID = 1001
         const val ACTION_STOP = "com.indiccontext.ACTION_STOP_OVERLAY"
 
+        /** Current mode — changed via [setMode]. Read by ChatAccessibilityService. */
+        @Volatile
+        var currentMode: OverlayMode = OverlayMode.INPUT_BAR
+
         @Volatile
         var instance: OverlayService? = null
             private set
     }
 
+    // ── Lifecycle ─────────────────────────────────────────────────────
+
     override fun onCreate() {
         super.onCreate()
         instance = this
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        Log.i(TAG, "Created.")
+        Log.i(TAG, "Created. mode=$currentMode")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -76,154 +110,169 @@ class OverlayService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // Read mode from intent extra (set by IndicContextModule.startOverlay)
+        intent?.getStringExtra("mode")?.let { currentMode = OverlayMode.from(it) }
         startForeground(NOTIF_ID, buildNotification())
-        // DO NOT call showOverlay() here — ChatAccessibilityService drives visibility
-        Log.i(TAG, "Started. Waiting for input focus trigger.")
+        Log.i(TAG, "Started. mode=$currentMode — waiting for trigger.")
         return START_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        hideOverlay()
+        hideToolbar()
+        hideEdgePill()
         instance = null
         Log.i(TAG, "Destroyed.")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    // ───────────────────────────────────────────────────────────────
-    // Overlay show / hide
-    // ───────────────────────────────────────────────────────────────
+    // ── Public mode API ───────────────────────────────────────────────
 
     /**
-     * Shows or repositions the floating toolbar above [inputBounds].
-     * Safe to call rapidly — position updates are debounced.
+     * Change overlay mode at runtime (called from JS via IndicContextModule).
+     * Tears down any currently-showing view from the old mode before switching.
      */
-    fun showOverlay(inputBounds: Rect? = null) {
+    fun setMode(mode: OverlayMode) {
+        mainHandler.post {
+            if (mode == currentMode) return@post
+            Log.i(TAG, "Mode change: $currentMode → $mode")
+            // Tear down old mode's view
+            hideToolbar()
+            hideEdgePill()
+            currentMode = mode
+        }
+    }
+
+    // ── INPUT_BAR — show/hide toolbar ─────────────────────────────────
+
+    /**
+     * Show (or reposition) the toolbar above [inputBounds].
+     * Called ONLY when an EditText gains focus inside a supported app.
+     * In EDGE_SLIDER mode this is a no-op.
+     */
+    fun showToolbar(inputBounds: Rect? = null) {
+        if (currentMode != OverlayMode.INPUT_BAR) return
         mainHandler.post {
             val wm = windowManager ?: return@post
             val density = resources.displayMetrics.density
             val screenH = resources.displayMetrics.heightPixels
-            val overlayH = overlayView?.height?.takeIf { it > 0 } ?: (88 * density).toInt()
+            val tbH = toolbarView?.height?.takeIf { it > 0 } ?: (88 * density).toInt()
 
-            val targetY: Int = when {
-                inputBounds != null && inputBounds.top > overlayH + (24 * density).toInt() ->
-                    (inputBounds.top - overlayH - (6 * density).toInt())
-                        .coerceIn(0, screenH - overlayH)
-                else ->
-                    // Keyboard not yet open or bounds are zero — park at ~50% height
-                    (screenH * 0.50f).toInt()
+            // Position the toolbar just above the input field / keyboard.
+            // If bounds are unavailable, park at 60% height (still below mid-screen).
+            val targetY: Int = if (
+                inputBounds != null && inputBounds.top > tbH + (24 * density).toInt()
+            ) {
+                (inputBounds.top - tbH - (6 * density).toInt())
+                    .coerceIn(0, screenH - tbH)
+            } else {
+                // Input bounds unknown yet — place at 60% and wait for a real update.
+                // This is NOT shown until bounds arrive from the accessibility event.
+                (screenH * 0.60f).toInt()
             }
 
-            if (isOverlayShowing && overlayView != null && currentParams != null) {
-                // Debounced position update
+            // If already showing: just update position (debounced)
+            if (isToolbarShowing && toolbarView != null && toolbarParams != null) {
                 val delta = Math.abs(targetY - lastTargetY)
-                if (delta <= POSITION_THRESHOLD_PX) return@post   // trivial move, skip
+                if (delta <= POSITION_THRESHOLD_PX) return@post
 
                 pendingPositionUpdate?.let { mainHandler.removeCallbacks(it) }
                 val r = Runnable {
-                    if (!isOverlayShowing) return@Runnable
-                    currentParams?.y = targetY
+                    if (!isToolbarShowing) return@Runnable
+                    toolbarParams?.y = targetY
                     lastTargetY = targetY
-                    try {
-                        wm.updateViewLayout(overlayView, currentParams)
-                        Log.v(TAG, "Position -> y=$targetY")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "updateViewLayout: ${e.message}")
-                    }
+                    try { wm.updateViewLayout(toolbarView, toolbarParams) }
+                    catch (e: Exception) { Log.w(TAG, "updateViewLayout: ${e.message}") }
                 }
                 pendingPositionUpdate = r
                 mainHandler.postDelayed(r, POSITION_DEBOUNCE_MS)
                 return@post
             }
 
-            // First show: inflate view
-            val inflater = LayoutInflater.from(this@OverlayService)
-            val view = inflater.inflate(R.layout.overlay_panel, null)
-
-            view.findViewById<View>(R.id.btn_close)?.setOnClickListener {
-                hideOverlay()
-            }
-            view.findViewById<View>(R.id.btn_mic)?.setOnClickListener {
-                Toast.makeText(applicationContext, "🎤 Voice (Gnani Prisma) — coming soon", Toast.LENGTH_SHORT).show()
-            }
-            view.findViewById<View>(R.id.btn_tone)?.setOnClickListener {
-                Toast.makeText(applicationContext, "🎨 Tone Rewrite (Gnani Evon) — coming soon", Toast.LENGTH_SHORT).show()
-            }
-            view.findViewById<View>(R.id.btn_factcheck)?.setOnClickListener {
-                Toast.makeText(applicationContext, "✅ Fact Check — coming soon", Toast.LENGTH_SHORT).show()
-            }
-            view.findViewById<View>(R.id.btn_icebreaker)?.setOnClickListener {
-                Toast.makeText(applicationContext, "❄️ Icebreaker — coming soon", Toast.LENGTH_SHORT).show()
-            }
-
-            val params = buildLayoutParams(targetY)
-
-            // Drag handle
-            val dragHandle = view.findViewById<View>(R.id.drag_handle)
-            var dY = 0
-            var iY = 0f
-            dragHandle?.setOnTouchListener { _, ev ->
-                when (ev.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        dY = currentParams?.y ?: 0
-                        iY = ev.rawY
-                        true
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        val ny = (dY + (ev.rawY - iY).toInt()).coerceIn(0, screenH - overlayH)
-                        currentParams?.let { p ->
-                            p.y = ny
-                            lastTargetY = ny
-                            try {
-                                wm.updateViewLayout(view, p)
-                            } catch (e: Exception) {
-                                // View layout update failed
-                            }
-                        }
-                        true
-                    }
-                    else -> false
-                }
-            }
-
+            // First show: inflate and add to window
+            val view = inflateToolbar(wm, screenH)
+            val params = buildToolbarParams(targetY)
             try {
                 wm.addView(view, params)
-                overlayView = view
-                currentParams = params
-                isOverlayShowing = true
+                toolbarView = view
+                toolbarParams = params
+                isToolbarShowing = true
                 lastTargetY = targetY
-                Log.i(TAG, "Overlay shown at y=$targetY")
+                Log.i(TAG, "Toolbar shown at y=$targetY")
             } catch (e: Exception) {
-                Log.e(TAG, "addView failed: ${e.message}")
+                Log.e(TAG, "addView(toolbar) failed: ${e.message}")
             }
         }
     }
 
-    /** Hides and detaches the overlay. Idempotent. */
-    fun hideOverlay() {
+    /** Completely removes the toolbar from the screen. Idempotent. */
+    fun hideToolbar() {
         mainHandler.post {
             pendingPositionUpdate?.let { mainHandler.removeCallbacks(it) }
             pendingPositionUpdate = null
-            val view = overlayView ?: return@post
+            val view = toolbarView ?: return@post
             try { windowManager?.removeView(view) }
-            catch (e: Exception) { Log.w(TAG, "removeView: ${e.message}") }
+            catch (e: Exception) { Log.w(TAG, "removeView(toolbar): ${e.message}") }
             finally {
-                overlayView = null; currentParams = null
-                isOverlayShowing = false; lastTargetY = -1
-                Log.i(TAG, "Overlay hidden.")
+                toolbarView = null; toolbarParams = null
+                isToolbarShowing = false; lastTargetY = -1
+                Log.i(TAG, "Toolbar hidden.")
             }
         }
     }
 
-    fun isShowing(): Boolean = isOverlayShowing
+    fun isToolbarShowing(): Boolean = isToolbarShowing
 
-    // ───────────────────────────────────────────────────────────────
-    // Badge (Phase 2)
-    // ───────────────────────────────────────────────────────────────
+    // ── EDGE_SLIDER — show pill / expand / collapse / hide ────────────
+
+    /**
+     * Show the faded edge pill.
+     * Called when a supported app comes to the foreground in EDGE_SLIDER mode.
+     */
+    fun showEdgePill() {
+        if (currentMode != OverlayMode.EDGE_SLIDER) return
+        mainHandler.post {
+            if (isEdgeShowing) return@post
+            val wm = windowManager ?: return@post
+            val view = inflateEdgePill(wm)
+            val params = buildEdgeParams()
+            try {
+                wm.addView(view, params)
+                edgeView = view
+                isEdgeShowing = true
+                isEdgeExpanded = false
+                Log.i(TAG, "Edge pill shown.")
+            } catch (e: Exception) {
+                Log.e(TAG, "addView(edge) failed: ${e.message}")
+            }
+        }
+    }
+
+    /** Remove the edge pill (and toolbar if expanded). Idempotent. */
+    fun hideEdgePill() {
+        mainHandler.post {
+            val view = edgeView ?: return@post
+            try { windowManager?.removeView(view) }
+            catch (e: Exception) { Log.w(TAG, "removeView(edge): ${e.message}") }
+            finally {
+                edgeView = null
+                isEdgeShowing = false
+                isEdgeExpanded = false
+                Log.i(TAG, "Edge pill hidden.")
+            }
+        }
+    }
+
+    // ── Badge ─────────────────────────────────────────────────────────
 
     private fun updateBadge(count: Int) {
-        val badge = overlayView?.findViewById<TextView>(R.id.context_badge) ?: return
+        val target = when {
+            isToolbarShowing -> toolbarView
+            isEdgeExpanded   -> edgeView
+            else             -> return
+        }
+        val badge = target?.findViewById<TextView>(R.id.context_badge) ?: return
         if (count > 0) {
             badge.visibility = View.VISIBLE
             badge.text = if (count > 99) "99+" else count.toString()
@@ -232,11 +281,121 @@ class OverlayService : Service() {
         }
     }
 
-    // ───────────────────────────────────────────────────────────────
-    // WindowManager params
-    // ───────────────────────────────────────────────────────────────
+    // ── View inflation helpers ─────────────────────────────────────────
 
-    private fun buildLayoutParams(yPos: Int): WindowManager.LayoutParams {
+    private fun inflateToolbar(wm: WindowManager, screenH: Int): View {
+        val view = LayoutInflater.from(this).inflate(R.layout.overlay_panel, null)
+
+        view.findViewById<View>(R.id.btn_close)?.setOnClickListener {
+            hideToolbar()
+        }
+        view.findViewById<View>(R.id.btn_mic)?.setOnClickListener {
+            Toast.makeText(applicationContext, "🎤 Voice (Gnani Prisma) — coming soon", Toast.LENGTH_SHORT).show()
+        }
+        view.findViewById<View>(R.id.btn_tone)?.setOnClickListener {
+            Toast.makeText(applicationContext, "🎨 Tone Rewrite (Gnani Evon) — coming soon", Toast.LENGTH_SHORT).show()
+        }
+        view.findViewById<View>(R.id.btn_factcheck)?.setOnClickListener {
+            Toast.makeText(applicationContext, "✅ Fact Check — coming soon", Toast.LENGTH_SHORT).show()
+        }
+        view.findViewById<View>(R.id.btn_icebreaker)?.setOnClickListener {
+            Toast.makeText(applicationContext, "❄️ Icebreaker — coming soon", Toast.LENGTH_SHORT).show()
+        }
+
+        // Drag handle
+        var dragStartY = 0
+        var dragStartRawY = 0f
+        val density = resources.displayMetrics.density
+        val overlayH = (88 * density).toInt()
+
+        view.findViewById<View>(R.id.drag_handle)?.setOnTouchListener { _, ev ->
+            when (ev.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    dragStartY = toolbarParams?.y ?: 0
+                    dragStartRawY = ev.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val ny = (dragStartY + (ev.rawY - dragStartRawY).toInt())
+                        .coerceIn(0, screenH - overlayH)
+                    toolbarParams?.let { p ->
+                        p.y = ny
+                        lastTargetY = ny
+                        try { wm.updateViewLayout(view, p) }
+                        catch (e: Exception) { /* ignore during drag */ }
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+        return view
+    }
+
+    private fun inflateEdgePill(wm: WindowManager): View {
+        // Reuse overlay_panel layout for the expanded state;
+        // the edge tab is a small strip on the right that acts as a handle.
+        val view = LayoutInflater.from(this).inflate(R.layout.edge_pill, null)
+
+        view.findViewById<View>(R.id.edge_tab)?.setOnClickListener {
+            expandToToolbar(view, wm)
+        }
+        // Collapse on close
+        view.findViewById<View>(R.id.edge_toolbar_close)?.setOnClickListener {
+            collapseToEdgePill(view, wm)
+        }
+        view.findViewById<View>(R.id.edge_btn_mic)?.setOnClickListener {
+            Toast.makeText(applicationContext, "🎤 Voice — coming soon", Toast.LENGTH_SHORT).show()
+        }
+        view.findViewById<View>(R.id.edge_btn_tone)?.setOnClickListener {
+            Toast.makeText(applicationContext, "🎨 Tone — coming soon", Toast.LENGTH_SHORT).show()
+        }
+        view.findViewById<View>(R.id.edge_btn_factcheck)?.setOnClickListener {
+            Toast.makeText(applicationContext, "✅ Fact — coming soon", Toast.LENGTH_SHORT).show()
+        }
+        view.findViewById<View>(R.id.edge_btn_icebreaker)?.setOnClickListener {
+            Toast.makeText(applicationContext, "❄️ Ice — coming soon", Toast.LENGTH_SHORT).show()
+        }
+
+        // Tapping outside the expanded toolbar collapses it back to the edge pill
+        view.setOnTouchListener { _, ev ->
+            if (ev.action == MotionEvent.ACTION_OUTSIDE && isEdgeExpanded) {
+                collapseToEdgePill(view, wm)
+                true
+            } else {
+                false
+            }
+        }
+
+        return view
+    }
+
+    private fun expandToToolbar(view: View, wm: WindowManager) {
+        view.findViewById<View>(R.id.edge_tab_container)?.visibility = View.GONE
+        view.findViewById<View>(R.id.edge_toolbar_container)?.visibility = View.VISIBLE
+        isEdgeExpanded = true
+        // Update layout to full width
+        edgeView?.let { v ->
+            val p = buildEdgeParams(expanded = true)
+            try { wm.updateViewLayout(v, p) } catch (e: Exception) {}
+        }
+        Log.d(TAG, "Edge expanded to toolbar.")
+    }
+
+    private fun collapseToEdgePill(view: View, wm: WindowManager) {
+        view.findViewById<View>(R.id.edge_toolbar_container)?.visibility = View.GONE
+        view.findViewById<View>(R.id.edge_tab_container)?.visibility = View.VISIBLE
+        isEdgeExpanded = false
+        edgeView?.let { v ->
+            val p = buildEdgeParams(expanded = false)
+            try { wm.updateViewLayout(v, p) } catch (e: Exception) {}
+        }
+        Log.d(TAG, "Edge collapsed to pill.")
+    }
+
+    // ── WindowManager params ──────────────────────────────────────────
+
+    private fun buildToolbarParams(yPos: Int): WindowManager.LayoutParams {
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
@@ -255,9 +414,29 @@ class OverlayService : Service() {
         }
     }
 
-    // ───────────────────────────────────────────────────────────────
-    // Foreground notification
-    // ───────────────────────────────────────────────────────────────
+    private fun buildEdgeParams(expanded: Boolean = false): WindowManager.LayoutParams {
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+
+        val screenH = resources.displayMetrics.heightPixels
+        val yPos = (screenH * 0.38f).toInt()  // ~38% from top — avoids status bar and nav bar
+
+        return WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                (if (expanded) WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH else 0),
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.END
+            x = 0; y = yPos
+        }
+    }
+
+    // ── Foreground notification ───────────────────────────────────────
 
     private fun buildNotification(): Notification {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -280,7 +459,7 @@ class OverlayService : Service() {
 
         return builder
             .setContentTitle("IndicContext Copilot")
-            .setContentText("Tap a chat input in WhatsApp or Telegram to activate.")
+            .setContentText("Active in WhatsApp & Telegram.")
             .setSmallIcon(android.R.drawable.ic_menu_edit)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPi)
             .setOngoing(true)

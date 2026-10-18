@@ -31,6 +31,13 @@ export interface PermissionStatus {
   microphone: 'granted' | 'denied' | 'unknown';
 }
 
+/**
+ * Controls how the overlay is triggered:
+ * - INPUT_BAR  — toolbar appears only when the user focuses a chat input field.
+ * - EDGE_SLIDER — a faded pill stays on the right edge of supported apps; tap to expand.
+ */
+export type OverlayMode = 'INPUT_BAR' | 'EDGE_SLIDER';
+
 export interface BufferUpdatedEvent {
   buffer: ChatBubble[];
 }
@@ -77,11 +84,12 @@ export async function requestMicrophonePermission(): Promise<void> {
  * Starts the OverlayService, which draws the floating copilot panel
  * above the stock keyboard using SYSTEM_ALERT_WINDOW.
  *
+ * @param mode Overlay behaviour mode. Defaults to 'INPUT_BAR'.
  * Prerequisites: overlay permission must be granted.
  */
-export async function startOverlay(): Promise<void> {
+export async function startOverlay(mode: OverlayMode = 'INPUT_BAR'): Promise<void> {
   try {
-    await NativeModule.startOverlay();
+    await NativeModule.startOverlay(mode);
   } catch (err: any) {
     // Android's startForegroundService returns ComponentName, which Expo Modules cannot serialize to JS.
     // The service has already started successfully at this point.
@@ -97,6 +105,14 @@ export async function startOverlay(): Promise<void> {
  */
 export async function stopOverlay(): Promise<void> {
   return NativeModule.stopOverlay();
+}
+
+/**
+ * Changes overlay mode at runtime without restarting the service.
+ * If the copilot is already active, the UI switches immediately.
+ */
+export async function setOverlayMode(mode: OverlayMode): Promise<void> {
+  return NativeModule.setOverlayMode(mode);
 }
 
 // ─── Context Buffer ───────────────────────────────────────────────────────────
@@ -174,6 +190,7 @@ const IndicContext = {
   requestMicrophonePermission,
   startOverlay,
   stopOverlay,
+  setOverlayMode,
   getSessionBuffer,
   injectText,
   readInputFieldText,
