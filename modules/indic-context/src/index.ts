@@ -80,7 +80,16 @@ export async function requestMicrophonePermission(): Promise<void> {
  * Prerequisites: overlay permission must be granted.
  */
 export async function startOverlay(): Promise<void> {
-  return NativeModule.startOverlay();
+  try {
+    await NativeModule.startOverlay();
+  } catch (err: any) {
+    // Android's startForegroundService returns ComponentName, which Expo Modules cannot serialize to JS.
+    // The service has already started successfully at this point.
+    if (err?.message?.includes('ComponentName')) {
+      return;
+    }
+    throw err;
+  }
 }
 
 /**

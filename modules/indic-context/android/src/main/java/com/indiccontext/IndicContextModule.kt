@@ -94,11 +94,13 @@ class IndicContextModule : Module() {
             } else {
                 ctx.startService(intent)
             }
+            null
         }
 
         AsyncFunction("stopOverlay") {
             val intent = Intent(ctx, OverlayService::class.java)
             ctx.stopService(intent)
+            null
         }
 
         // ───────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Linking,
+  PermissionsAndroid,
   Platform,
   ScrollView,
   StyleSheet,
@@ -116,9 +117,9 @@ export default function DashboardScreen() {
           await IndicContext.stopOverlay();
         }
         setCopilotEnabled(value);
-      } catch (e) {
+      } catch (e: any) {
         console.error('[Dashboard] overlay toggle error:', e);
-        Alert.alert('Error', 'Failed to toggle the copilot. Please try again.');
+        Alert.alert('Error', `Failed to toggle the copilot: ${e?.message || e}`);
       }
     },
     [permissions],
@@ -143,9 +144,29 @@ export default function DashboardScreen() {
 
   const requestMicrophone = useCallback(async () => {
     try {
+      if (Platform.OS === 'android') {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+          {
+            title: 'Microphone Permission',
+            message:
+              'IndicContext Assistant requires microphone access to transcribe voice into text.',
+            buttonPositive: 'Allow',
+            buttonNegative: 'Deny',
+          },
+        );
+        if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+          checkPermissions();
+          return;
+        } else if (granted === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
+          Linking.openSettings();
+          return;
+        }
+      }
       await IndicContext.requestMicrophonePermission();
       checkPermissions();
     } catch (e) {
+      console.warn('[Dashboard] microphone request error:', e);
       Linking.openSettings();
     }
   }, [checkPermissions]);
