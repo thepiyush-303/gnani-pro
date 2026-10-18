@@ -158,10 +158,9 @@ class ChatAccessibilityService : AccessibilityService() {
                 } else {
                     buffer.resetIfAppChanged(pkg)
                     // If window changed within the supported app (e.g. backed out of chat to conversation list),
-                    // verify if an input field is actually still focused
-                    if (inputFocused && !isInputStillFocused()) {
-                        Log.d(TAG, "Input no longer focused after window state change in $pkg")
-                        onInputLostFocus()
+                    // re-verify input bar & keyboard state immediately
+                    if (OverlayService.currentMode == OverlayMode.INPUT_BAR) {
+                        checkInputBarState(pkg)
                     }
                     // EDGE_SLIDER: show the pill whenever a supported app comes to foreground
                     if (OverlayService.currentMode == OverlayMode.EDGE_SLIDER) {
@@ -170,22 +169,21 @@ class ChatAccessibilityService : AccessibilityService() {
                 }
             }
 
-            // ── Window hierarchy changed: check if keyboard closed ────
+            // ── Window hierarchy changed: check keyboard state immediately ───
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
-                if (pkg in SUPPORTED_PACKAGES && inputFocused && !isKeyboardVisible()) {
-                    Log.d(TAG, "Keyboard dismissed (TYPE_WINDOWS_CHANGED) in $pkg")
-                    onInputLostFocus()
+                if (pkg in SUPPORTED_PACKAGES && OverlayService.currentMode == OverlayMode.INPUT_BAR) {
+                    checkInputBarState(pkg)
                 }
             }
 
-            // ── Input focus: the ONE trigger for showing the overlay ──
+            // ── Input focus: store focus, show ONLY if keyboard is open ──────
             AccessibilityEvent.TYPE_VIEW_FOCUSED -> {
                 if (pkg !in SUPPORTED_PACKAGES) return
                 val node = event.source ?: return
                 handleFocusEvent(node, pkg)
             }
 
-            // ── Click: hide if user taps outside the input ────────────
+            // ── Click: re-check if input tapped or outside tapped ────────────
             AccessibilityEvent.TYPE_VIEW_CLICKED -> {
                 if (pkg !in SUPPORTED_PACKAGES) return
                 val node = event.source ?: return
@@ -193,17 +191,23 @@ class ChatAccessibilityService : AccessibilityService() {
                 if (!isEdit && inputFocused) {
                     onInputLostFocus()
                 } else if (isEdit) {
-                    // Re-read bounds in case user tapped a different edit field
+                    // Tap on EditText brings up keyboard
                     handleFocusEvent(node, pkg)
                     return  // handleFocusEvent already recycles or retains node
                 }
                 node.recycle()
             }
 
-            // ── Content change: capture bubbles only ─────────────────
+            // ── Content change: verify keyboard & capture bubbles ────────────
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
                 if (pkg !in SUPPORTED_PACKAGES) return
+
+                // Check keyboard & input state in real time on EVERY layout/content change!
+                if (OverlayService.currentMode == OverlayMode.INPUT_BAR) {
+                    checkInputBarState(pkg)
+                }
+
                 val root = rootInActiveWindow ?: return
                 try {
                     val added = walkAndCapture(root, pkg)
@@ -216,26 +220,82 @@ class ChatAccessibilityService : AccessibilityService() {
     }
 
     // ───────────────────────────────────────────────────────────────
-    // Focus logic
+    // Focus & Keyboard Detection Logic
     // ───────────────────────────────────────────────────────────────
 
     private fun isKeyboardVisible(): Boolean {
         return try {
-            windows?.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD } == true
+            val wins = windows ?: return false
+            for (i in 0 until wins.size) {
+                val w = wins[i]
+                if (w.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
+                    val b = Rect()
+                    w.getBoundsInScreen(b)
+                    if (b.height() > 100) return true
+                }
+            }
+            false
         } catch (e: Exception) {
             false
         }
     }
 
-    private fun isInputStillFocused(): Boolean {
-        val root = rootInActiveWindow ?: return false
-        return try {
+    private fun isKeyboardReallyOpen(inputBounds: Rect? = null): Boolean {
+        // Signal 1: IME window presence
+        if (isKeyboardVisible()) return true
+
+        // Signal 2: Input field pushed up by soft keyboard
+        if (inputBounds != null && inputBounds.bottom > 0) {
+            val screenH = resources.displayMetrics.heightPixels
+            val density = resources.displayMetrics.density
+            val distanceToBottom = screenH - inputBounds.bottom
+            // Soft keyboard is typically 220dp-320dp high. If input field is > 150dp above bottom, keyboard is up!
+            if (distanceToBottom > (150 * density).toInt()) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun checkInputBarState(pkg: String) {
+        val root = rootInActiveWindow ?: return
+        try {
             val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             val isEdit = focused?.className?.contains("EditText", true) == true
-            focused?.recycle()
-            isEdit
+
+            if (!isEdit) {
+                // No EditText has focus right now (e.g. user closed keyboard, tapped message, or exited chat)
+                if (inputFocused || OverlayService.instance?.isToolbarShowing() == true) {
+                    onInputLostFocus()
+                }
+                focused?.recycle()
+                return
+            }
+
+            // EditText is focused. Check if keyboard is ACTUALLY open!
+            val bounds = Rect()
+            focused.getBoundsInScreen(bounds)
+            val keyboardOpen = isKeyboardReallyOpen(bounds)
+
+            if (keyboardOpen) {
+                if (focusedInputNode == null || focusedInputNode !== focused) {
+                    clearFocusedNode()
+                    focusedInputNode = focused // retain
+                } else {
+                    focused.recycle()
+                }
+                inputFocused = true
+                inputBoundsRect.set(bounds)
+                OverlayService.instance?.showToolbar(Rect(bounds))
+            } else {
+                // EditText focused (e.g. entering chat), but keyboard is NOT open -> hide toolbar!
+                if (OverlayService.instance?.isToolbarShowing() == true) {
+                    OverlayService.instance?.hideToolbar()
+                }
+                focused.recycle()
+            }
         } catch (e: Exception) {
-            false
+            Log.w(TAG, "checkInputBarState error: ${e.message}")
         } finally {
             root.recycle()
         }
@@ -248,17 +308,23 @@ class ChatAccessibilityService : AccessibilityService() {
             return
         }
 
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        Log.d(TAG, "EditText focused in $pkg bounds=$bounds")
+
         clearFocusedNode()
-        focusedInputNode = node   // retain; do NOT recycle
+        focusedInputNode = node // retain
         inputFocused = true
+        inputBoundsRect.set(bounds)
 
-        node.getBoundsInScreen(inputBoundsRect)
-        Log.d(TAG, "EditText focused in $pkg bounds=$inputBoundsRect")
-
-        // INPUT_BAR: show toolbar above keyboard when input is focused
-        // EDGE_SLIDER: pill is already shown; toolbar expansion is handled by pill tap
+        // Show toolbar ONLY if the soft keyboard is genuinely open!
         if (OverlayService.currentMode == OverlayMode.INPUT_BAR) {
-            OverlayService.instance?.showToolbar(Rect(inputBoundsRect))
+            if (isKeyboardReallyOpen(bounds)) {
+                OverlayService.instance?.showToolbar(Rect(bounds))
+            } else {
+                // Keyboard not up yet (e.g. chat just opened) -> keep toolbar hidden!
+                OverlayService.instance?.hideToolbar()
+            }
         }
 
         val text = node.text?.toString() ?: ""

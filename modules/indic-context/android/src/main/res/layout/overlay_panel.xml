@@ -19,22 +19,25 @@
         android:background="@drawable/overlay_bg"
         android:elevation="10dp">
 
-        <!-- Row 1: drag handle + context badge + close -->
+        <!-- Row 1: large drag handle area + context badge + close -->
         <RelativeLayout
+            android:id="@+id/drag_bar"
             android:layout_width="match_parent"
-            android:layout_height="30dp"
+            android:layout_height="36dp"
             android:paddingStart="12dp"
-            android:paddingEnd="8dp">
+            android:paddingEnd="8dp"
+            android:clickable="true"
+            android:focusable="false">
 
-            <!-- Drag handle centred -->
+            <!-- Drag handle centred (prominent visual pill) -->
             <View
                 android:id="@+id/drag_handle"
-                android:layout_width="40dp"
-                android:layout_height="4dp"
+                android:layout_width="60dp"
+                android:layout_height="5dp"
                 android:layout_centerInParent="true"
                 android:background="@drawable/drag_handle_bg"
-                android:clickable="true"
-                android:focusable="true" />
+                android:clickable="false"
+                android:focusable="false" />
 
             <!-- Close button (right) -->
             <ImageButton

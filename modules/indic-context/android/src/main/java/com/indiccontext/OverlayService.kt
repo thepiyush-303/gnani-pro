@@ -302,23 +302,31 @@ class OverlayService : Service() {
             Toast.makeText(applicationContext, "❄️ Icebreaker — coming soon", Toast.LENGTH_SHORT).show()
         }
 
-        // Drag handle
+        // Large, comfortable drag bar
+        var dragStartX = 0
         var dragStartY = 0
+        var dragStartRawX = 0f
         var dragStartRawY = 0f
         val density = resources.displayMetrics.density
+        val screenH = resources.displayMetrics.heightPixels
         val overlayH = (88 * density).toInt()
 
-        view.findViewById<View>(R.id.drag_handle)?.setOnTouchListener { _, ev ->
+        val dragArea = view.findViewById<View>(R.id.drag_bar) ?: view.findViewById<View>(R.id.drag_handle)
+        dragArea?.setOnTouchListener { _, ev ->
             when (ev.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    dragStartX = toolbarParams?.x ?: 0
                     dragStartY = toolbarParams?.y ?: 0
+                    dragStartRawX = ev.rawX
                     dragStartRawY = ev.rawY
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    val nx = (dragStartX + (ev.rawX - dragStartRawX).toInt())
                     val ny = (dragStartY + (ev.rawY - dragStartRawY).toInt())
                         .coerceIn(0, screenH - overlayH)
                     toolbarParams?.let { p ->
+                        p.x = nx
                         p.y = ny
                         lastTargetY = ny
                         try { wm.updateViewLayout(view, p) }

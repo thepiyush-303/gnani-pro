@@ -13,10 +13,11 @@
 -->
 <accessibility-service
     xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowContentChanged|typeViewScrolled|typeViewFocused|typeWindowStateChanged|typeViewClicked"
+    android:accessibilityEventTypes="typeWindowContentChanged|typeViewScrolled|typeViewFocused|typeWindowStateChanged|typeViewClicked|typeWindowsChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds"
     android:canRetrieveWindowContent="true"
     android:description="@string/accessibility_service_description"
-    android:notificationTimeout="100"
+    android:notificationTimeout="50"
     android:settingsActivity=".MainActivity" />
 
