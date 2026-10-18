@@ -80,12 +80,12 @@ class IndicContextModule : Module() {
                 ctx.startForegroundService(intent)
             else
                 ctx.startService(intent)
-            null
+            Unit
         }
 
         AsyncFunction("stopOverlay") {
             ctx.stopService(Intent(ctx, OverlayService::class.java))
-            null
+            Unit
         }
 
         // ── Session buffer ────────────────────────────────────────
@@ -109,7 +109,7 @@ class IndicContextModule : Module() {
                 ?: throw Exception("AccessibilityService not connected.")
             val ok = svc.injectText(text)
             if (!ok) throw Exception("Text injection failed — no focused input field.")
-            null
+            Unit
         }
 
         AsyncFunction("readInputFieldText") {
