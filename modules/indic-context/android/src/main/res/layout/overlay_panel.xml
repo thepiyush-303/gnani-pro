@@ -21,104 +21,137 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:background="@drawable/overlay_bg"
-    android:paddingBottom="8dp">
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="4dp">
 
-    <!-- Drag handle -->
-    <View
-        android:id="@+id/drag_handle"
-        android:layout_width="40dp"
-        android:layout_height="4dp"
-        android:layout_gravity="center_horizontal"
-        android:layout_marginTop="8dp"
-        android:layout_marginBottom="8dp"
-        android:background="#4DFFFFFF"
-        android:clickable="true"
-        android:focusable="true" />
-
-    <!-- Toolbar row -->
+    <!-- Card container with background -->
     <LinearLayout
+        android:id="@+id/card_container"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp"
-        android:paddingBottom="4dp">
+        android:orientation="vertical"
+        android:background="@drawable/overlay_bg"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp">
 
-        <!-- Mic button -->
-        <LinearLayout
-            android:layout_width="0dp"
+        <!-- Header row: Drag handle & Close button -->
+        <RelativeLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center">
-            <ImageButton
-                android:id="@+id/btn_mic"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="#1AFFFFFF"
-                android:src="@android:drawable/ic_btn_speak_now"
-                android:padding="12dp"
-                android:contentDescription="Voice to Text"
-                android:scaleType="fitCenter" />
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Voice"
-                android:textColor="#B3FFFFFF"
-                android:textSize="10sp"
-                android:layout_marginTop="3dp" />
-        </LinearLayout>
+            android:paddingBottom="4dp">
 
-        <!-- Tone button -->
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center">
-            <ImageButton
-                android:id="@+id/btn_tone"
+            <!-- Drag handle in center -->
+            <View
+                android:id="@+id/drag_handle"
                 android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="#1AFFFFFF"
-                android:src="@android:drawable/ic_menu_edit"
-                android:padding="12dp"
-                android:contentDescription="Tone and Rewrite"
-                android:scaleType="fitCenter" />
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Tone"
-                android:textColor="#B3FFFFFF"
-                android:textSize="10sp"
-                android:layout_marginTop="3dp" />
-        </LinearLayout>
+                android:layout_height="5dp"
+                android:layout_centerInParent="true"
+                android:background="#4DFFFFFF"
+                android:clickable="true"
+                android:focusable="true" />
 
-        <!-- Icebreaker button -->
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center">
+            <!-- Close button on right -->
             <ImageButton
-                android:id="@+id/btn_icebreaker"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="#1AFFFFFF"
-                android:src="@android:drawable/star_on"
-                android:padding="12dp"
-                android:contentDescription="Icebreaker Suggestions"
+                android:id="@+id/btn_close"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_menu_close_clear_cancel"
+                android:contentDescription="Close overlay"
+                android:padding="4dp"
                 android:scaleType="fitCenter" />
-            <TextView
-                android:layout_width="wrap_content"
+        </RelativeLayout>
+
+        <!-- Actions row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="2dp">
+
+            <!-- Mic button -->
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="Icebreaker"
-                android:textColor="#B3FFFFFF"
-                android:textSize="10sp"
-                android:layout_marginTop="3dp" />
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center">
+                <ImageButton
+                    android:id="@+id/btn_mic"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:background="#1AFFFFFF"
+                    android:src="@android:drawable/ic_btn_speak_now"
+                    android:padding="10dp"
+                    android:contentDescription="Voice to Text"
+                    android:scaleType="fitCenter" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Voice"
+                    android:textColor="#B3FFFFFF"
+                    android:textSize="10sp"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+
+            <!-- Tone button -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center">
+                <ImageButton
+                    android:id="@+id/btn_tone"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:background="#1AFFFFFF"
+                    android:src="@android:drawable/ic_menu_edit"
+                    android:padding="10dp"
+                    android:contentDescription="Tone and Rewrite"
+                    android:scaleType="fitCenter" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Tone"
+                    android:textColor="#B3FFFFFF"
+                    android:textSize="10sp"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+
+            <!-- Icebreaker button -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center">
+                <ImageButton
+                    android:id="@+id/btn_icebreaker"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:background="#1AFFFFFF"
+                    android:src="@android:drawable/star_on"
+                    android:padding="10dp"
+                    android:contentDescription="Icebreaker Suggestions"
+                    android:scaleType="fitCenter" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Icebreaker"
+                    android:textColor="#B3FFFFFF"
+                    android:textSize="10sp"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+
         </LinearLayout>
 
     </LinearLayout>

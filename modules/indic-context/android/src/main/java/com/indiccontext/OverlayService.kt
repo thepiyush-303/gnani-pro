@@ -8,44 +8,40 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.ImageButton
+import android.widget.Toast
 
 /**
- * OverlayService — Phase 1 Scaffold
+ * OverlayService
  *
- * Draws the floating IndicContext copilot panel above the stock keyboard
- * using SYSTEM_ALERT_WINDOW permission and Android's [WindowManager].
+ * Manages the floating IndicContext copilot toolbar.
  *
- * ## Lifecycle (Option B — Manual Toggle + Auto-show)
- * - Started via [IndicContextModule.startOverlay] when the user enables the
- *   copilot from the dashboard.
- * - Shows/hides the panel based on [ChatAccessibilityService] input field
- *   focus events (auto-show when a supported app's input is focused).
- * - A persistent foreground notification keeps the service alive and provides
- *   a manual "Stop Copilot" action.
- *
- * ## Overlay Architecture
- * Phase 1: Native Android view inflated from [R.layout.overlay_panel].
- *   → Shows the toolbar: Mic, Tone, Icebreaker buttons + drag handle.
- * Phase 2+: A ReactRootView will be mounted inside the container
- *   to render the full React Native overlay UI.
- *
- * ## SYSTEM_ALERT_WINDOW Requirement
- * This service MUST NOT be started unless [Settings.canDrawOverlays] is true.
- * [IndicContextModule.startOverlay] enforces this check before starting the service.
+ * Key Behavior:
+ * - When started from the dashboard, it starts as a foreground service with an ongoing notification.
+ * - It does NOT display the overlay immediately.
+ * - The overlay view is shown only when an input field is focused in a supported messaging app.
+ * - The overlay view automatically docks right above the focused input field / keyboard.
+ * - The overlay view is automatically removed when navigating away or switching to unsupported apps.
+ * - Users can drag the handle to adjust position, or tap the close (✕) button to dismiss.
  */
 class OverlayService : Service() {
 
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
+    private var currentParams: WindowManager.LayoutParams? = null
     private var isOverlayShowing = false
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     companion object {
         private const val TAG = "OverlayService"
@@ -53,18 +49,10 @@ class OverlayService : Service() {
         private const val NOTIF_ID = 1001
         private const val ACTION_STOP = "com.indiccontext.ACTION_STOP_OVERLAY"
 
-        /**
-         * Singleton reference so [IndicContextModule] can show/hide the overlay
-         * without needing a full service binding.
-         */
         @Volatile
         var instance: OverlayService? = null
             private set
     }
-
-    // ───────────────────────────────────────────────────────────────
-    // Lifecycle
-    // ───────────────────────────────────────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
@@ -81,7 +69,8 @@ class OverlayService : Service() {
         }
 
         startForeground(NOTIF_ID, buildNotification())
-        showOverlay()
+        // Deliberately NOT calling showOverlay() here!
+        // Overlay will be triggered automatically when typing in a supported chat app.
 
         Log.i(TAG, "OverlayService started. Foreground notification active.")
         return START_STICKY
@@ -101,54 +90,118 @@ class OverlayService : Service() {
     // ───────────────────────────────────────────────────────────────
 
     /**
-     * Inflates the overlay panel view and adds it to the [WindowManager].
-     * Called from [onStartCommand].
-     *
-     * Phase 1: Inflates native XML layout.
-     * Phase 2+: Mounts ReactRootView inside the container.
+     * Shows or updates the floating overlay panel positioned above the focused input field.
      */
-    fun showOverlay() {
-        if (isOverlayShowing) return
+    fun showOverlay(inputBounds: Rect? = null) {
+        mainHandler.post {
+            val wm = windowManager ?: return@post
 
-        val inflater = LayoutInflater.from(this)
-        val view = inflater.inflate(R.layout.overlay_panel, null)
+            val displayMetrics = resources.displayMetrics
+            val density = displayMetrics.density
+            val screenHeight = displayMetrics.heightPixels
+            val overlayHeightPx = overlayView?.height?.takeIf { it > 0 } ?: (68 * density).toInt()
 
-        // Wire up Phase 1 button click listeners (stubs for now)
-        view.findViewById<ImageButton>(R.id.btn_mic)?.setOnClickListener {
-            Log.d(TAG, "[Phase 1 stub] Mic button tapped")
-            // TODO (Phase 3): trigger AudioCaptureModule.startRecording()
+            val targetY = if (inputBounds != null && inputBounds.top > 0) {
+                // Dock directly above the top edge of the focused input field
+                (inputBounds.top - overlayHeightPx - (6 * density).toInt())
+                    .coerceIn((48 * density).toInt(), screenHeight - overlayHeightPx - (48 * density).toInt())
+            } else {
+                // Fallback: place around 45% of screen height
+                (screenHeight * 0.45f).toInt()
+            }
+
+            // If already showing, update position dynamically if it moved
+            if (isOverlayShowing && overlayView != null && currentParams != null) {
+                if (currentParams?.y != targetY) {
+                    currentParams?.y = targetY
+                    try {
+                        wm.updateViewLayout(overlayView, currentParams)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "updateViewLayout failed", e)
+                    }
+                }
+                return@post
+            }
+
+            val inflater = LayoutInflater.from(this)
+            val view = inflater.inflate(R.layout.overlay_panel, null)
+
+            // Close button: allows user to dismiss the overlay immediately
+            view.findViewById<View>(R.id.btn_close)?.setOnClickListener {
+                Log.d(TAG, "Overlay close button tapped.")
+                hideOverlay()
+            }
+
+            // Phase 1 stubs
+            view.findViewById<ImageButton>(R.id.btn_mic)?.setOnClickListener {
+                Log.d(TAG, "[Phase 1 stub] Mic button tapped")
+                Toast.makeText(applicationContext, "🎤 Voice Copilot (Gnani Prisma)", Toast.LENGTH_SHORT).show()
+            }
+            view.findViewById<ImageButton>(R.id.btn_tone)?.setOnClickListener {
+                Log.d(TAG, "[Phase 1 stub] Tone button tapped")
+                Toast.makeText(applicationContext, "🎨 Tone Rewrite (Gnani Evon)", Toast.LENGTH_SHORT).show()
+            }
+            view.findViewById<ImageButton>(R.id.btn_icebreaker)?.setOnClickListener {
+                Log.d(TAG, "[Phase 1 stub] Icebreaker button tapped")
+                Toast.makeText(applicationContext, "❄️ Icebreaker suggestions", Toast.LENGTH_SHORT).show()
+            }
+
+            val params = buildLayoutParams(targetY)
+
+            // Drag handle to allow repositioning if desired
+            val dragHandle = view.findViewById<View>(R.id.drag_handle)
+            var initialY = 0
+            var initialTouchY = 0f
+            dragHandle?.setOnTouchListener { _, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        initialY = params.y
+                        initialTouchY = event.rawY
+                        true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val newY = (initialY + (event.rawY - initialTouchY).toInt())
+                            .coerceIn((30 * density).toInt(), screenHeight - (overlayView?.height ?: (70 * density).toInt()))
+                        params.y = newY
+                        try {
+                            wm.updateViewLayout(view, params)
+                        } catch (e: Exception) {
+                            // View might not be attached
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            }
+
+            try {
+                wm.addView(view, params)
+                overlayView = view
+                currentParams = params
+                isOverlayShowing = true
+                Log.i(TAG, "Overlay shown above input at y=$targetY.")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error adding overlay view to WindowManager", e)
+            }
         }
-        view.findViewById<ImageButton>(R.id.btn_tone)?.setOnClickListener {
-            Log.d(TAG, "[Phase 1 stub] Tone button tapped")
-            // TODO (Phase 4): expand tone/temperature panel
-        }
-        view.findViewById<ImageButton>(R.id.btn_icebreaker)?.setOnClickListener {
-            Log.d(TAG, "[Phase 1 stub] Icebreaker button tapped")
-            // TODO (Phase 6): generate icebreaker suggestions
-        }
-
-        val params = buildLayoutParams()
-        windowManager?.addView(view, params)
-        overlayView = view
-        isOverlayShowing = true
-
-        Log.i(TAG, "Overlay shown.")
     }
 
     /**
-     * Removes the overlay view from the [WindowManager].
-     * Safe to call even if the overlay isn't showing.
+     * Removes the overlay view from the WindowManager.
      */
     fun hideOverlay() {
-        val view = overlayView ?: return
-        try {
-            windowManager?.removeView(view)
-        } catch (e: Exception) {
-            Log.w(TAG, "hideOverlay: exception removing view", e)
-        } finally {
-            overlayView = null
-            isOverlayShowing = false
-            Log.i(TAG, "Overlay hidden.")
+        mainHandler.post {
+            val view = overlayView ?: return@post
+            try {
+                windowManager?.removeView(view)
+            } catch (e: Exception) {
+                Log.w(TAG, "hideOverlay: exception removing view", e)
+            } finally {
+                overlayView = null
+                currentParams = null
+                isOverlayShowing = false
+                Log.i(TAG, "Overlay hidden.")
+            }
         }
     }
 
@@ -158,7 +211,7 @@ class OverlayService : Service() {
     // WindowManager layout params
     // ───────────────────────────────────────────────────────────────
 
-    private fun buildLayoutParams(): WindowManager.LayoutParams {
+    private fun buildLayoutParams(yPos: Int): WindowManager.LayoutParams {
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
@@ -170,14 +223,14 @@ class OverlayService : Service() {
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             type,
-            // NOT_FOCUSABLE: touch events pass through to the keyboard/chat app underneath.
-            // WATCH_OUTSIDE_TOUCH: we receive outside touch events (used later for auto-hide).
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.BOTTOM  // Sits just above the keyboard area
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = yPos
         }
     }
 
@@ -186,21 +239,19 @@ class OverlayService : Service() {
     // ───────────────────────────────────────────────────────────────
 
     private fun buildNotification(): Notification {
-        // Create notification channel (required API 26+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 NOTIF_CHANNEL_ID,
                 "IndicContext Copilot",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Keeps the copilot overlay running"
+                description = "Keeps the copilot active for chat apps"
                 setShowBadge(false)
             }
             getSystemService(NotificationManager::class.java)
                 ?.createNotificationChannel(channel)
         }
 
-        // Stop action intent
         val stopIntent = Intent(this, OverlayService::class.java).apply {
             action = ACTION_STOP
         }
@@ -218,7 +269,7 @@ class OverlayService : Service() {
 
         return builder
             .setContentTitle("🧠 IndicContext Copilot Active")
-            .setContentText("Floating overlay is running above your keyboard.")
+            .setContentText("Auto-activates when typing in WhatsApp & Telegram.")
             .setSmallIcon(android.R.drawable.ic_menu_edit)
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
