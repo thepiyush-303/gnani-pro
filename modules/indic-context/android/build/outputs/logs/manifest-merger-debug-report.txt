@@ -1,0 +1,16 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /home/piyush-bhatt/Desktop/dros/gnani-pro/modules/indic-context/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest3662541007186404412.xml:2:13-83
+INJECTED from /home/piyush-bhatt/Desktop/dros/gnani-pro/modules/indic-context/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest3662541007186404412.xml:2:13-83
+	package
+		INJECTED from /home/piyush-bhatt/Desktop/dros/gnani-pro/modules/indic-context/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest3662541007186404412.xml
+	xmlns:android
+		ADDED from /home/piyush-bhatt/Desktop/dros/gnani-pro/modules/indic-context/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest3662541007186404412.xml:2:23-81
+uses-sdk
+INJECTED from /home/piyush-bhatt/Desktop/dros/gnani-pro/modules/indic-context/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest3662541007186404412.xml reason: use-sdk injection requested
+INJECTED from /home/piyush-bhatt/Desktop/dros/gnani-pro/modules/indic-context/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest3662541007186404412.xml
+INJECTED from /home/piyush-bhatt/Desktop/dros/gnani-pro/modules/indic-context/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest3662541007186404412.xml
+	android:targetSdkVersion
+		INJECTED from /home/piyush-bhatt/Desktop/dros/gnani-pro/modules/indic-context/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest3662541007186404412.xml
+	android:minSdkVersion
+		INJECTED from /home/piyush-bhatt/Desktop/dros/gnani-pro/modules/indic-context/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest3662541007186404412.xml

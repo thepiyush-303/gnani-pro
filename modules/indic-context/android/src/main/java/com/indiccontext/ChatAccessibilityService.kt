@@ -241,16 +241,15 @@ class ChatAccessibilityService : AccessibilityService() {
     }
 
     private fun isKeyboardReallyOpen(inputBounds: Rect? = null): Boolean {
-        // Signal 1: IME window presence
-        if (isKeyboardVisible()) return true
-
-        // Signal 2: Input field pushed up by soft keyboard
+        // Signal 1: Input field pushed up by soft keyboard
         if (inputBounds != null && inputBounds.bottom > 0) {
             val screenH = resources.displayMetrics.heightPixels
             val density = resources.displayMetrics.density
             val distanceToBottom = screenH - inputBounds.bottom
-            // Soft keyboard is typically 220dp-320dp high. If input field is > 150dp above bottom, keyboard is up!
-            if (distanceToBottom > (150 * density).toInt()) {
+            
+            // Soft keyboards take up at least 250dp of screen height. 
+            // If the input field is higher than that, the keyboard is definitely open.
+            if (distanceToBottom > (250 * density).toInt()) {
                 return true
             }
         }
@@ -280,19 +279,14 @@ class ChatAccessibilityService : AccessibilityService() {
             if (keyboardOpen) {
                 if (focusedInputNode == null || focusedInputNode !== focused) {
                     clearFocusedNode()
-                    focusedInputNode = focused // retain
-                } else {
-                    focused.recycle()
+                    focusedInputNode = focused 
                 }
                 inputFocused = true
                 inputBoundsRect.set(bounds)
                 OverlayService.instance?.showToolbar(Rect(bounds))
             } else {
-                // EditText focused (e.g. entering chat), but keyboard is NOT open -> hide toolbar!
-                if (OverlayService.instance?.isToolbarShowing() == true) {
-                    OverlayService.instance?.hideToolbar()
-                }
-                focused.recycle()
+                // If keyboard drops (user pressed back button) or isn't open yet
+                onInputLostFocus()
             }
         } catch (e: Exception) {
             Log.w(TAG, "checkInputBarState error: ${e.message}")
@@ -365,14 +359,21 @@ class ChatAccessibilityService : AccessibilityService() {
             val node = queue.removeFirst()
             val text = node.text?.toString()
             val cls = node.className?.toString() ?: ""
-            if (text != null && text.isNotBlank() && cls.endsWith("TextView") && text.length > 1) {
-                val bubble = ChatBubble(
-                    text = text.trim(),
-                    isSelf = null,
-                    nodeClassName = cls,
-                    appPackage = pkg,
-                )
-                if (buffer.add(bubble)) added++
+            if (text != null && text.isNotBlank() && cls.endsWith("TextView")) {
+                val cleanText = text.trim()
+                
+                // Ignore timestamps (e.g., "10:45 AM", "12:30 pm") and tiny words
+                val isTimeStamp = cleanText.matches(Regex(".*\\d{1,2}:\\d{2}.*"))
+                
+                if (cleanText.length > 3 && !isTimeStamp) {
+                    val bubble = ChatBubble(
+                        text = cleanText,
+                        isSelf = null,
+                        nodeClassName = cls,
+                        appPackage = pkg,
+                    )
+                    if (buffer.add(bubble)) added++
+                }
             }
             for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
             if (node !== root) node.recycle()
