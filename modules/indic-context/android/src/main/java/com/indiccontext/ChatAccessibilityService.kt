@@ -302,21 +302,30 @@ class ChatAccessibilityService : AccessibilityService() {
             return
         }
 
+        // --- NEW RULE: ONLY TRIGGER IN ACTUAL CHAT ROOMS ---
+        val viewId = node.viewIdResourceName
+        val isWhatsApp = pkg == "com.whatsapp" || pkg == "com.whatsapp.w4b"
+        
+        if (isWhatsApp && viewId != "com.whatsapp:id/entry") {
+            // It is WhatsApp, but NOT the main chat input (e.g., it's a search bar).
+            // Ignore it completely and keep the copilot hidden.
+            node.recycle()
+            return
+        }
+        // ---------------------------------------------------
+
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
-        Log.d(TAG, "EditText focused in $pkg bounds=$bounds")
 
         clearFocusedNode()
         focusedInputNode = node // retain
         inputFocused = true
         inputBoundsRect.set(bounds)
 
-        // Show toolbar ONLY if the soft keyboard is genuinely open!
         if (OverlayService.currentMode == OverlayMode.INPUT_BAR) {
             if (isKeyboardReallyOpen(bounds)) {
                 OverlayService.instance?.showToolbar(Rect(bounds))
             } else {
-                // Keyboard not up yet (e.g. chat just opened) -> keep toolbar hidden!
                 OverlayService.instance?.hideToolbar()
             }
         }

@@ -191,7 +191,7 @@ class OverlayService : Service() {
             }
 
             // First show: inflate and add to window
-            val view = inflateToolbar(wm, screenH)
+            val view = inflateEdgePill(wm)
             val params = buildToolbarParams(targetY)
             try {
                 wm.addView(view, params)
@@ -357,9 +357,8 @@ class OverlayService : Service() {
         // the edge tab is a small strip on the right that acts as a handle.
         val view = LayoutInflater.from(this).inflate(R.layout.edge_pill, null)
 
-        val edgeTab = view.findViewById<View>(R.id.edge_tab)
+        val edgeTab = view.findViewById<View>(R.id.edge_tab_container`)
         
-        // Variables to track finger movement
         var initialX = 0
         var initialY = 0
         var initialTouchX = 0f
@@ -369,38 +368,35 @@ class OverlayService : Service() {
         edgeTab?.setOnTouchListener { v, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    // Record exact starting coordinates
-                    val params = view.layoutParams as WindowManager.LayoutParams
+                    val params = view.layoutParams as? WindowManager.LayoutParams ?: return@setOnTouchListener false
                     initialX = params.x
                     initialY = params.y
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
                     isDragging = false
-                    true // Tell Android we are handling this touch
+                    true 
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    // Calculate how far the finger moved
                     val dx = Math.abs(event.rawX - initialTouchX)
                     val dy = Math.abs(event.rawY - initialTouchY)
-                    
-                    // If moved more than 10 pixels, consider it a drag (not a tap)
-                    if (dx > 10 || dy > 10) {
-                        isDragging = true
-                    }
+                    if (dx > 10 || dy > 10) isDragging = true
 
                     if (isDragging) {
-                        val params = view.layoutParams as WindowManager.LayoutParams
+                        val params = view.layoutParams as? WindowManager.LayoutParams ?: return@setOnTouchListener false
                         params.x = initialX + (event.rawX - initialTouchX).toInt()
                         params.y = initialY + (event.rawY - initialTouchY).toInt()
-                        wm.updateViewLayout(view, params) // Move the view!
+                        
+                        // Update global tracker so it doesn't snap back
+                        lastTargetY = params.y 
+                        toolbarParams?.x = params.x
+                        toolbarParams?.y = params.y
+                        
+                        try { wm.updateViewLayout(view, params) } catch (e: Exception) {}
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    // If the user just tapped and didn't drag, expand the toolbar
-                    if (!isDragging) {
-                        expandToToolbar(view, wm)
-                    }
+                    if (!isDragging) expandToToolbar(view, wm)
                     true
                 }
                 else -> false
