@@ -357,7 +357,7 @@ class OverlayService : Service() {
         // the edge tab is a small strip on the right that acts as a handle.
         val view = LayoutInflater.from(this).inflate(R.layout.edge_pill, null)
 
-        val edgeTab = view.findViewById<View>(R.id.edge_tab_container`)
+        val edgeTab = view.findViewById<View>(R.id.edge_tab_container)
         
         var initialX = 0
         var initialY = 0
