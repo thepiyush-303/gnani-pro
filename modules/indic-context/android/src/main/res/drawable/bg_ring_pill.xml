@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="oval">
-    <!-- Gradient ring background -->
+    <!-- Gradient ring background - light blue with reduced opacity -->
     <gradient
         android:angle="135"
-        android:startColor="#6366F1"
-        android:endColor="#4338CA"
+        android:startColor="#3B82F6"
+        android:endColor="#2563EB"
         android:type="linear" />
-    <!-- Crisp ring border -->
+    <!-- Crisp ring border with reduced opacity -->
     <stroke
-        android:width="2.5dp"
-        android:color="#FFFFFF" />
+        android:width="2dp"
+        android:color="#33FFFFFF" />
     <size
         android:width="56dp"
         android:height="56dp" />

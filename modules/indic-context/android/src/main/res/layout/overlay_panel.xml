@@ -7,24 +7,25 @@
     android:clickable="false"
     android:focusable="false">
 
-    <!-- Floating card with horizontal margins -->
+    <!-- Floating card with reduced width -->
     <LinearLayout
         android:id="@+id/overlay_card"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="10dp"
-        android:layout_marginEnd="10dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
         android:layout_marginBottom="6dp"
         android:orientation="vertical"
         android:background="@drawable/overlay_bg"
-        android:elevation="10dp">
+        android:elevation="10dp"
+        android:layout_gravity="center_horizontal">
 
-        <!-- Row 1: large drag handle area + context badge + close -->
+        <!-- Row 1: large drag handle area + context badge + collapse arrow -->
         <RelativeLayout
             android:id="@+id/drag_bar"
             android:layout_width="match_parent"
             android:layout_height="36dp"
-            android:paddingStart="12dp"
+            android:paddingStart="8dp"
             android:paddingEnd="8dp"
             android:clickable="true"
             android:focusable="false">
@@ -32,37 +33,26 @@
             <!-- Drag handle centred (prominent visual pill) -->
             <View
                 android:id="@+id/drag_handle"
-                android:layout_width="60dp"
-                android:layout_height="5dp"
+                android:layout_width="50dp"
+                android:layout_height="4dp"
                 android:layout_centerInParent="true"
                 android:background="@drawable/drag_handle_bg"
                 android:clickable="false"
                 android:focusable="false" />
 
-            <!-- Close button (right) -->
-            <ImageButton
-                android:id="@+id/btn_close"
-                android:layout_width="30dp"
-                android:layout_height="30dp"
-                android:layout_alignParentEnd="true"
-                android:layout_centerVertical="true"
-                android:background="@android:color/transparent"
-                android:src="@android:drawable/ic_menu_close_clear_cancel"
-                android:contentDescription="Close copilot"
-                android:padding="5dp"
-                android:scaleType="fitCenter" />
-
-            <!-- Context message count badge (to the left of close) -->
+            <!-- Context message count badge (between drag handle and collapse arrow) -->
             <TextView
                 android:id="@+id/context_badge"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_toStartOf="@id/btn_close"
+                android:layout_toEndOf="@id/drag_handle"
+                android:layout_toStartOf="@id/btn_collapse"
                 android:layout_centerVertical="true"
                 android:layout_marginEnd="4dp"
+                android:layout_marginStart="4dp"
                 android:background="@drawable/badge_bg"
-                android:paddingStart="7dp"
-                android:paddingEnd="7dp"
+                android:paddingStart="5dp"
+                android:paddingEnd="5dp"
                 android:paddingTop="1dp"
                 android:paddingBottom="1dp"
                 android:textColor="#FFFFFF"
@@ -70,6 +60,19 @@
                 android:fontFamily="sans-serif-medium"
                 android:visibility="gone"
                 android:text="0" />
+
+            <!-- Collapse arrow (right) - replaces close button -->
+            <ImageButton
+                android:id="@+id/btn_collapse"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:background="@android:color/transparent"
+                android:src="@android:drawable/ic_menu_revert"
+                android:contentDescription="Collapse toolbar"
+                android:padding="4dp"
+                android:scaleType="centerInside" />
         </RelativeLayout>
 
         <!-- ── Row 2: Feature action buttons ── -->

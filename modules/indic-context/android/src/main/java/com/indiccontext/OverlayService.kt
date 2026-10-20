@@ -308,9 +308,6 @@ class OverlayService : Service() {
     private fun inflateToolbar(wm: WindowManager, screenHeight: Int): View {
         val view = LayoutInflater.from(this).inflate(R.layout.overlay_panel, null)
 
-        view.findViewById<View>(R.id.btn_close)?.setOnClickListener {
-            hideToolbar()
-        }
         view.findViewById<View>(R.id.btn_mic)?.setOnClickListener {
             toggleVoiceRecording()
         }
@@ -322,6 +319,14 @@ class OverlayService : Service() {
         }
         view.findViewById<View>(R.id.btn_icebreaker)?.setOnClickListener {
             Toast.makeText(applicationContext, "❄️ Icebreaker — coming soon", Toast.LENGTH_SHORT).show()
+        }
+
+        // Collapse button - collapse toolbar to edge pill
+        view.findViewById<ImageButton>(R.id.btn_collapse)?.setOnClickListener {
+            // Hide current toolbar and switch to edge slider mode
+            hideToolbar()
+            setMode(OverlayMode.EDGE_SLIDER)
+            showEdgePill()
         }
 
         // Large, comfortable drag bar
@@ -346,19 +351,29 @@ class OverlayService : Service() {
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val params = view.layoutParams as? WindowManager.LayoutParams ?: return@setOnTouchListener false
-                    
+
                     // Calculate new position based on finger movement
                     params.x = initialX + (ev.rawX - initialTouchX).toInt()
-                    
+
                     // Prevent dragging too far off the bottom of the screen
                     val newY = initialY + (ev.rawY - initialTouchY).toInt()
-                    params.y = newY.coerceIn(0, screenH - overlayH)
-                    
+                    params.y = newY.coerceIn(0, screenHeight - overlayH)
+
+                    // NEW: Remove overlay when dragged to bottom (like other apps)
+                    // If dragged to very bottom (within 20% of screen height from bottom), remove overlay
+                    val screenHeight = resources.displayMetrics.heightPixels
+                    val bottomThreshold = (screenHeight * 0.8).toInt() // 80% from top = 20% from bottom
+                    if (params.y >= bottomThreshold) {
+                        // Remove overlay when dragged to bottom
+                        hideToolbar()
+                        return@setOnTouchListener true
+                    }
+
                     // Update global tracker and move view
                     lastTargetY = params.y
                     toolbarParams?.x = params.x
                     toolbarParams?.y = params.y
-                    
+
                     try { wm.updateViewLayout(view, params) }
                     catch (e: Exception) { /* ignore during rapid dragging */ }
                     true
@@ -402,12 +417,22 @@ class OverlayService : Service() {
                         val params = view.layoutParams as? WindowManager.LayoutParams ?: return@setOnTouchListener false
                         params.x = initialX + (event.rawX - initialTouchX).toInt()
                         params.y = initialY + (event.rawY - initialTouchY).toInt()
-                        
+
+                        // NEW: Remove overlay when dragged to bottom (like other apps)
+                        // If dragged to very bottom (within 20% of screen height from bottom), remove overlay
+                        val screenHeight = resources.displayMetrics.heightPixels
+                        val bottomThreshold = (screenHeight * 0.8).toInt() // 80% from top = 20% from bottom
+                        if (params.y >= bottomThreshold) {
+                            // Remove overlay when dragged to bottom
+                            hideEdgePill()
+                            return@setOnTouchListener true
+                        }
+
                         // Update global tracker so it doesn't snap back
-                        lastTargetY = params.y 
+                        lastTargetY = params.y
                         toolbarParams?.x = params.x
                         toolbarParams?.y = params.y
-                        
+
                         try { wm.updateViewLayout(view, params) } catch (e: Exception) {}
                     }
                     true

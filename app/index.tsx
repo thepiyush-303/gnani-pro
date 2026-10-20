@@ -107,7 +107,8 @@ export default function DashboardScreen() {
   // Initialize Gnani configuration
   useEffect(() => {
     const key =
-      process.env.EXPO_PUBLIC_GNANI_API_KEY ||
+      (globalThis as typeof globalThis & { process?: { env?: { EXPO_PUBLIC_GNANI_API_KEY?: string } } }).process?.env
+        ?.EXPO_PUBLIC_GNANI_API_KEY ||
       'vach_1ytE2CY5X2DI7nYe19xQ41pIcF75XgUXXFdRLhu4vuhN2qVlIHYqHNjYbqSZW3pAeBxWsMlcCQBgNUyg9O3hxFQoYUUpobcD_3d238769888eacc65a24109ee5f6fe78';
     IndicContext.setGnaniConfig(key, selectedLanguage).catch(() => {});
   }, [selectedLanguage]);
