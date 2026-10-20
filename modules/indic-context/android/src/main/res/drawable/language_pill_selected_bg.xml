@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- language_pill_selected_bg.xml - Highlighted / hovered state for language tags -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="135"
+        android:startColor="#6366F1"
+        android:endColor="#4F46E5"
+        android:type="linear" />
+    <corners android:radius="14dp" />
+    <stroke android:width="1.5dp" android:color="#C7D2FE" />
+</shape>
+

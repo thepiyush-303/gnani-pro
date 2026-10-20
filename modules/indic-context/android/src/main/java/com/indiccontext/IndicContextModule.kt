@@ -196,6 +196,8 @@ class IndicContextModule : Module() {
                 Settings.canDrawOverlays(ctx) else true
             if (!canDraw) throw Exception("SYSTEM_ALERT_WINDOW permission not granted.")
 
+            OverlayService.isCopilotActive = true
+
             val intent = Intent(ctx, OverlayService::class.java).apply {
                 putExtra("mode", mode)
             }
@@ -207,6 +209,8 @@ class IndicContextModule : Module() {
         }
 
         AsyncFunction("stopOverlay") {
+            OverlayService.isCopilotActive = false
+            OverlayService.instance?.hideOverlay()
             ctx.stopService(Intent(ctx, OverlayService::class.java))
             Unit
         }

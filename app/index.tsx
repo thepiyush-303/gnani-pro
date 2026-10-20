@@ -71,16 +71,16 @@ function PermissionRow({
 // ─────────────────────────────────────────────
 
 const INDIC_LANGUAGES: { code: string; label: string }[] = [
-  { code: 'hi-IN', label: 'Hindi (हिन्दी)' },
   { code: 'en-IN', label: 'English (India)' },
-  { code: 'bn-IN', label: 'Bengali (বাংলা)' },
+  { code: 'hi-IN', label: 'Hindi (हिन्दी)' },
+  { code: 'mr-IN', label: 'Marathi (मराठी)' },
+  { code: 'bn-IN', label: 'Bangla (বাংলা)' },
+  { code: 'te-IN', label: 'Telugu (తెలుగు)' },
+  { code: 'ta-IN', label: 'Tamil (தமிழ்)' },
+  { code: 'ml-IN', label: 'Malayalam (മലയാളം)' },
   { code: 'gu-IN', label: 'Gujarati (ગુજરાતી)' },
   { code: 'kn-IN', label: 'Kannada (ಕನ್ನಡ)' },
-  { code: 'ml-IN', label: 'Malayalam (മലയാളം)' },
-  { code: 'mr-IN', label: 'Marathi (मराठी)' },
   { code: 'pa-IN', label: 'Punjabi (ਪੰਜਾਬੀ)' },
-  { code: 'ta-IN', label: 'Tamil (தமிழ்)' },
-  { code: 'te-IN', label: 'Telugu (తెలుగు)' },
 ];
 
 export default function DashboardScreen() {
@@ -98,7 +98,7 @@ export default function DashboardScreen() {
   const [activeApp, setActiveApp] = useState<string | null>(null);
 
   // Phase 3: Voice-to-Text state
-  const [selectedLanguage, setSelectedLanguage] = useState<string>('hi-IN');
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('en-IN');
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcript, setTranscript] = useState<string>('');

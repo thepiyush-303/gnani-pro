@@ -52,12 +52,10 @@ class ChatAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "ChatA11y"
 
+        // Restricted to WhatsApp only for current phase
         val SUPPORTED_PACKAGES = setOf(
             "com.whatsapp",
             "com.whatsapp.w4b",
-            "org.telegram.messenger",
-            "org.telegram.messenger.web",
-            "com.instagram.android",
         )
 
         /**
@@ -110,8 +108,7 @@ class ChatAccessibilityService : AccessibilityService() {
         mainHandler.removeCallbacksAndMessages(null)
         buffer.clear()
         clearFocusedNode()
-        OverlayService.instance?.hideToolbar()
-        OverlayService.instance?.hideEdgePill()
+        OverlayService.instance?.hideOverlay()
         Log.i(TAG, "Destroyed.")
     }
 
@@ -140,6 +137,12 @@ class ChatAccessibilityService : AccessibilityService() {
         val event = event ?: return
         val pkg = event.packageName?.toString() ?: return
 
+        // If copilot is disabled from dashboard, do not show any overlay under any circumstances
+        if (!OverlayService.isCopilotActive) {
+            OverlayService.instance?.hideOverlay()
+            return
+        }
+
         // Completely ignore keyboard, system UI, and our own app events
         if (isKeyboard(pkg) || isSystemUi(pkg) || isOurApp(pkg)) return
 
@@ -159,19 +162,13 @@ class ChatAccessibilityService : AccessibilityService() {
                     buffer.resetIfAppChanged(pkg)
                     // If window changed within the supported app (e.g. backed out of chat to conversation list),
                     // re-verify input bar & keyboard state immediately
-                    if (OverlayService.currentMode == OverlayMode.INPUT_BAR) {
-                        checkInputBarState(pkg)
-                    }
-                    // EDGE_SLIDER: show the pill whenever a supported app comes to foreground
-                    if (OverlayService.currentMode == OverlayMode.EDGE_SLIDER) {
-                        OverlayService.instance?.showEdgePill()
-                    }
+                    checkInputBarState(pkg)
                 }
             }
 
             // ── Window hierarchy changed: check keyboard state immediately ───
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
-                if (pkg in SUPPORTED_PACKAGES && OverlayService.currentMode == OverlayMode.INPUT_BAR) {
+                if (pkg in SUPPORTED_PACKAGES) {
                     checkInputBarState(pkg)
                 }
             }
@@ -247,13 +244,13 @@ class ChatAccessibilityService : AccessibilityService() {
             val density = resources.displayMetrics.density
             val distanceToBottom = screenH - inputBounds.bottom
             
-            // Soft keyboards take up at least 250dp of screen height. 
-            // If the input field is higher than that, the keyboard is definitely open.
-            if (distanceToBottom > (250 * density).toInt()) {
+            // Soft keyboards take up at least 160dp of screen height. 
+            if (distanceToBottom > (160 * density).toInt()) {
                 return true
             }
         }
-        return false
+        // Signal 2: Input method window active
+        return isKeyboardVisible()
     }
 
     private fun checkInputBarState(pkg: String) {
@@ -283,7 +280,7 @@ class ChatAccessibilityService : AccessibilityService() {
                 }
                 inputFocused = true
                 inputBoundsRect.set(bounds)
-                OverlayService.instance?.showToolbar(Rect(bounds))
+                OverlayService.instance?.showOverlay(Rect(bounds))
             } else {
                 // If keyboard drops (user pressed back button) or isn't open yet
                 onInputLostFocus()
@@ -322,12 +319,10 @@ class ChatAccessibilityService : AccessibilityService() {
         inputFocused = true
         inputBoundsRect.set(bounds)
 
-        if (OverlayService.currentMode == OverlayMode.INPUT_BAR) {
-            if (isKeyboardReallyOpen(bounds)) {
-                OverlayService.instance?.showToolbar(Rect(bounds))
-            } else {
-                OverlayService.instance?.hideToolbar()
-            }
+        if (isKeyboardReallyOpen(bounds)) {
+            OverlayService.instance?.showOverlay(Rect(bounds))
+        } else {
+            OverlayService.instance?.hideOverlay()
         }
 
         val text = node.text?.toString() ?: ""
@@ -337,18 +332,14 @@ class ChatAccessibilityService : AccessibilityService() {
     private fun onInputLostFocus() {
         inputFocused = false
         clearFocusedNode()
-        // Only hide the toolbar in INPUT_BAR mode; EDGE_SLIDER pill stays visible
-        if (OverlayService.currentMode == OverlayMode.INPUT_BAR) {
-            OverlayService.instance?.hideToolbar()
-        }
+        OverlayService.instance?.hideOverlay()
         IndicContextModule.instance?.emitInputBlurred(foregroundPkg ?: "")
     }
 
     private fun onLeftSupportedApp() {
         inputFocused = false
         clearFocusedNode()
-        OverlayService.instance?.hideToolbar()
-        OverlayService.instance?.hideEdgePill()
+        OverlayService.instance?.hideOverlay()
     }
 
     private fun clearFocusedNode() {

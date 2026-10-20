@@ -33,9 +33,9 @@ object GnaniSttClient {
     @Volatile
     var apiKey: String = "vach_1ytE2CY5X2DI7nYe19xQ41pIcF75XgUXXFdRLhu4vuhN2qVlIHYqHNjYbqSZW3pAeBxWsMlcCQBgNUyg9O3hxFQoYUUpobcD_3d238769888eacc65a24109ee5f6fe78"
 
-    /** Current selected language code for transcription (defaults to Hindi/English) */
+    /** Current selected language code for transcription (defaults to English / Indian) */
     @Volatile
-    var currentLanguage: String = "hi-IN"
+    var currentLanguage: String = "en-IN"
 
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
