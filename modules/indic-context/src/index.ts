@@ -49,6 +49,32 @@ export interface InputFieldEvent {
   appPackage: string;
 }
 
+export interface VoiceTranscriptEvent {
+  /** Transcribed speech text from Gnani Prisma V2.5 */
+  text: string;
+  /** Whether recognition was successful */
+  success: boolean;
+  /** Language code used for recognition */
+  language: string;
+}
+
+export interface RecordingStateEvent {
+  /** Whether the microphone is actively capturing audio */
+  isRecording: boolean;
+}
+
+export type IndicLanguageCode =
+  | 'hi-IN'
+  | 'en-IN'
+  | 'bn-IN'
+  | 'gu-IN'
+  | 'kn-IN'
+  | 'ml-IN'
+  | 'mr-IN'
+  | 'pa-IN'
+  | 'ta-IN'
+  | 'te-IN';
+
 // ─── Native Module Binding ────────────────────────────────────────────────────
 
 const MODULE_NAME = 'IndicContext';
@@ -145,6 +171,62 @@ export async function readInputFieldText(): Promise<string> {
   return NativeModule.readInputFieldText();
 }
 
+// ─── Voice-to-Text & Gnani STT (Phase 3) ──────────────────────────────────────
+
+/**
+ * Updates Gnani Prisma API key and default language code.
+ * Changes are persisted across app restarts via Android SharedPreferences.
+ */
+export async function setGnaniConfig(
+  apiKey?: string,
+  language?: string,
+): Promise<{ apiKeySet: boolean; language: string }> {
+  return NativeModule.setGnaniConfig(apiKey ?? null, language ?? null);
+}
+
+/**
+ * Returns whether an API key is configured and the current language code.
+ */
+export async function getGnaniConfig(): Promise<{ apiKeyConfigured: boolean; language: string }> {
+  return NativeModule.getGnaniConfig();
+}
+
+/**
+ * Updates the active speech recognition language (e.g. 'hi-IN', 'en-IN').
+ */
+export async function setLanguage(language: IndicLanguageCode | string): Promise<string> {
+  return NativeModule.setLanguage(language);
+}
+
+/**
+ * Returns the currently active speech recognition language.
+ */
+export async function getLanguage(): Promise<string> {
+  return NativeModule.getLanguage();
+}
+
+/**
+ * Starts audio recording for voice-to-text.
+ * Can be called from the dashboard or overlay.
+ */
+export async function startVoiceRecording(): Promise<void> {
+  return NativeModule.startVoiceRecording();
+}
+
+/**
+ * Stops audio recording, uploads to Gnani Prisma v2.5, and returns the transcript.
+ */
+export async function stopVoiceRecording(): Promise<string> {
+  return NativeModule.stopVoiceRecording();
+}
+
+/**
+ * Checks if voice recording is currently in progress.
+ */
+export async function isVoiceRecording(): Promise<boolean> {
+  return NativeModule.isVoiceRecording();
+}
+
 // ─── Events ───────────────────────────────────────────────────────────────────
 
 /**
@@ -183,6 +265,24 @@ export function addInputBlurListener(
   return emitter.addListener<InputFieldEvent>('onInputFieldBlurred', listener);
 }
 
+/**
+ * Fires when a voice transcription completes from Gnani Prisma V2.5.
+ */
+export function addVoiceTranscriptListener(
+  listener: (event: VoiceTranscriptEvent) => void,
+) {
+  return emitter.addListener<VoiceTranscriptEvent>('onVoiceTranscript', listener);
+}
+
+/**
+ * Fires when recording starts or stops.
+ */
+export function addRecordingStateListener(
+  listener: (event: RecordingStateEvent) => void,
+) {
+  return emitter.addListener<RecordingStateEvent>('onRecordingStateChanged', listener);
+}
+
 // ─── Default export (convenience object) ─────────────────────────────────────
 
 const IndicContext = {
@@ -194,9 +294,18 @@ const IndicContext = {
   getSessionBuffer,
   injectText,
   readInputFieldText,
+  setGnaniConfig,
+  getGnaniConfig,
+  setLanguage,
+  getLanguage,
+  startVoiceRecording,
+  stopVoiceRecording,
+  isVoiceRecording,
   addBufferListener,
   addInputFocusListener,
   addInputBlurListener,
+  addVoiceTranscriptListener,
+  addRecordingStateListener,
 };
 
 export default IndicContext;

@@ -27,6 +27,8 @@ class IndicContextModule : Module() {
     private val ctx: Context
         get() = requireNotNull(appContext.reactContext) { "ReactContext null" }
 
+    private var localVoiceRecorder: VoiceRecorder? = null
+
     companion object {
         @Volatile
         var instance: IndicContextModule? = null
@@ -37,13 +39,34 @@ class IndicContextModule : Module() {
 
         Name("IndicContext")
 
-        OnCreate { IndicContextModule.instance = this@IndicContextModule }
-        OnDestroy { IndicContextModule.instance = null }
+        OnCreate {
+            IndicContextModule.instance = this@IndicContextModule
+            // Load saved Gnani configuration if available
+            try {
+                val prefs = ctx.getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+                prefs.getString("gnani_api_key", null)?.let {
+                    if (it.isNotBlank()) GnaniSttClient.apiKey = it
+                }
+                prefs.getString("gnani_language", null)?.let {
+                    if (it.isNotBlank()) GnaniSttClient.currentLanguage = it
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("IndicContextModule", "Failed to load saved config: ${e.message}")
+            }
+        }
+
+        OnDestroy {
+            localVoiceRecorder?.cancel()
+            localVoiceRecorder = null
+            IndicContextModule.instance = null
+        }
 
         Events(
             "onBufferUpdated",
             "onInputFieldFocused",
             "onInputFieldBlurred",
+            "onVoiceTranscript",
+            "onRecordingStateChanged",
         )
 
         // ── Permissions ───────────────────────────────────────────
@@ -66,6 +89,104 @@ class IndicContextModule : Module() {
         AsyncFunction("requestMicrophonePermission") { promise: Promise ->
             // Runtime permission requires Activity context; dashboard falls back to Linking.openSettings
             promise.resolve(null)
+        }
+
+        // ── Gnani STT Configuration (Phase 3) ─────────────────────
+
+        AsyncFunction("setGnaniConfig") { apiKey: String?, language: String? ->
+            val prefs = ctx.getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+            val editor = prefs.edit()
+            if (!apiKey.isNullOrBlank()) {
+                GnaniSttClient.apiKey = apiKey
+                editor.putString("gnani_api_key", apiKey)
+            }
+            if (!language.isNullOrBlank()) {
+                GnaniSttClient.currentLanguage = language
+                editor.putString("gnani_language", language)
+            }
+            editor.apply()
+            mapOf("apiKeySet" to !apiKey.isNullOrBlank(), "language" to GnaniSttClient.currentLanguage)
+        }
+
+        AsyncFunction("getGnaniConfig") {
+            mapOf(
+                "apiKeyConfigured" to GnaniSttClient.apiKey.isNotBlank(),
+                "language" to GnaniSttClient.currentLanguage
+            )
+        }
+
+        AsyncFunction("setLanguage") { lang: String ->
+            if (lang.isNotBlank()) {
+                GnaniSttClient.currentLanguage = lang
+                ctx.getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+                    .edit().putString("gnani_language", lang).apply()
+            }
+            GnaniSttClient.currentLanguage
+        }
+
+        AsyncFunction("getLanguage") {
+            GnaniSttClient.currentLanguage
+        }
+
+        // ── Voice Recording & STT Control (Phase 3) ───────────────
+
+        AsyncFunction("startVoiceRecording") {
+            val micOk = ContextCompat.checkSelfPermission(
+                ctx, Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!micOk) throw Exception("RECORD_AUDIO permission not granted.")
+
+            val overlaySvc = OverlayService.instance
+            if (overlaySvc != null && !overlaySvc.isVoiceRecording()) {
+                overlaySvc.toggleVoiceRecording()
+            } else {
+                if (localVoiceRecorder == null) {
+                    localVoiceRecorder = VoiceRecorder(ctx)
+                }
+                localVoiceRecorder?.start()
+                emitRecordingStateChanged(true)
+            }
+            Unit
+        }
+
+        AsyncFunction("stopVoiceRecording") { promise: Promise ->
+            val overlaySvc = OverlayService.instance
+            if (overlaySvc != null && overlaySvc.isVoiceRecording()) {
+                // If overlay service is active, toggle it and wait for transcript event
+                overlaySvc.toggleVoiceRecording()
+                promise.resolve("Transcribing via overlay...")
+                return@AsyncFunction
+            }
+
+            val recorder = localVoiceRecorder
+            if (recorder == null || !recorder.isRecording()) {
+                emitRecordingStateChanged(false)
+                promise.resolve("")
+                return@AsyncFunction
+            }
+
+            val audioFile = recorder.stop()
+            emitRecordingStateChanged(false)
+
+            if (audioFile == null || audioFile.length() < 1000L) {
+                promise.reject("AUDIO_TOO_SHORT", "Audio recording was too short.", null)
+                return@AsyncFunction
+            }
+
+            GnaniSttClient.transcribe(audioFile) { result ->
+                result.onSuccess { transcript ->
+                    emitVoiceTranscript(transcript, true)
+                    promise.resolve(transcript)
+                }.onFailure { err ->
+                    emitVoiceTranscript("", false)
+                    promise.reject("STT_ERROR", err.message ?: "Transcription failed", err)
+                }
+            }
+        }
+
+        AsyncFunction("isVoiceRecording") {
+            OverlayService.instance?.isVoiceRecording()
+                ?: (localVoiceRecorder?.isRecording() == true)
         }
 
         // ── Overlay control ───────────────────────────────────────
@@ -165,6 +286,29 @@ class IndicContextModule : Module() {
             sendEvent("onInputFieldBlurred", mapOf("appPackage" to appPackage, "text" to ""))
         } catch (e: Exception) {
             android.util.Log.w("IndicContextModule", "emitInputBlurred: ${e.message}")
+        }
+    }
+
+    fun emitVoiceTranscript(text: String, success: Boolean) {
+        try {
+            sendEvent(
+                "onVoiceTranscript",
+                mapOf(
+                    "text" to text,
+                    "success" to success,
+                    "language" to GnaniSttClient.currentLanguage
+                )
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("IndicContextModule", "emitVoiceTranscript: ${e.message}")
+        }
+    }
+
+    fun emitRecordingStateChanged(isRecording: Boolean) {
+        try {
+            sendEvent("onRecordingStateChanged", mapOf("isRecording" to isRecording))
+        } catch (e: Exception) {
+            android.util.Log.w("IndicContextModule", "emitRecordingStateChanged: ${e.message}")
         }
     }
 }

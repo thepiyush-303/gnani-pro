@@ -49,6 +49,7 @@ function withIndicContextManifest(expoConfig) {
     addPermission(manifest, 'android.permission.SYSTEM_ALERT_WINDOW');
     addPermission(manifest, 'android.permission.FOREGROUND_SERVICE');
     addPermission(manifest, 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE');
+    addPermission(manifest, 'android.permission.FOREGROUND_SERVICE_MICROPHONE');
     addPermission(manifest, 'android.permission.RECORD_AUDIO');
     addPermission(manifest, 'android.permission.INTERNET');
 
@@ -57,7 +58,7 @@ function withIndicContextManifest(expoConfig) {
       $: {
         'android:name': 'com.indiccontext.OverlayService',
         'android:exported': 'false',
-        'android:foregroundServiceType': 'specialUse',
+        'android:foregroundServiceType': 'specialUse|microphone',
       },
     });
 

@@ -1,12 +1,16 @@
 package com.indiccontext
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Build
@@ -19,8 +23,10 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 
 /**
  * OverlayService — Phase 3
@@ -74,6 +80,10 @@ class OverlayService : Service() {
     private var isEdgeShowing = false
     private var isEdgeExpanded = false
 
+    // ── Voice Recorder (Phase 3) ──────────────────────────────────────
+    private lateinit var voiceRecorder: VoiceRecorder
+    private var isTranscribing = false
+
     // ── Badge counter ─────────────────────────────────────────────────
     var contextMessageCount: Int = 0
         set(value) {
@@ -102,6 +112,15 @@ class OverlayService : Service() {
         super.onCreate()
         instance = this
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        voiceRecorder = VoiceRecorder(applicationContext)
+        voiceRecorder.onTimeoutListener = {
+            mainHandler.post {
+                if (voiceRecorder.isRecording()) {
+                    Log.i(TAG, "Voice recording reached maximum duration -> auto transcribing.")
+                    toggleVoiceRecording()
+                }
+            }
+        }
         Log.i(TAG, "Created. mode=$currentMode")
     }
 
@@ -119,6 +138,9 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        if (::voiceRecorder.isInitialized && voiceRecorder.isRecording()) {
+            voiceRecorder.cancel()
+        }
         hideToolbar()
         hideEdgePill()
         instance = null
@@ -191,7 +213,7 @@ class OverlayService : Service() {
             }
 
             // First show: inflate and add to window
-            val view = inflateEdgePill(wm)
+            val view = inflateToolbar(wm, screenH)
             val params = buildToolbarParams(targetY)
             try {
                 wm.addView(view, params)
@@ -283,14 +305,14 @@ class OverlayService : Service() {
 
     // ── View inflation helpers ─────────────────────────────────────────
 
-    private fun inflateToolbar(wm: WindowManager, screenH: Int): View {
+    private fun inflateToolbar(wm: WindowManager, screenHeight: Int): View {
         val view = LayoutInflater.from(this).inflate(R.layout.overlay_panel, null)
 
         view.findViewById<View>(R.id.btn_close)?.setOnClickListener {
             hideToolbar()
         }
         view.findViewById<View>(R.id.btn_mic)?.setOnClickListener {
-            Toast.makeText(applicationContext, "🎤 Voice (Gnani Prisma) — coming soon", Toast.LENGTH_SHORT).show()
+            toggleVoiceRecording()
         }
         view.findViewById<View>(R.id.btn_tone)?.setOnClickListener {
             Toast.makeText(applicationContext, "🎨 Tone Rewrite (Gnani Evon) — coming soon", Toast.LENGTH_SHORT).show()
@@ -303,12 +325,7 @@ class OverlayService : Service() {
         }
 
         // Large, comfortable drag bar
-        var dragStartX = 0
-        var dragStartY = 0
-        var dragStartRawX = 0f
-        var dragStartRawY = 0f
         val density = resources.displayMetrics.density
-        val screenH = resources.displayMetrics.heightPixels
         val overlayH = (88 * density).toInt()
 
         val dragArea = view.findViewById<View>(R.id.drag_bar) ?: view.findViewById<View>(R.id.drag_handle)
@@ -365,7 +382,7 @@ class OverlayService : Service() {
         var initialTouchY = 0f
         var isDragging = false
 
-        edgeTab?.setOnTouchListener { v, event ->
+        edgeTab?.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     val params = view.layoutParams as? WindowManager.LayoutParams ?: return@setOnTouchListener false
@@ -407,7 +424,7 @@ class OverlayService : Service() {
             collapseToEdgePill(view, wm)
         }
         view.findViewById<View>(R.id.edge_btn_mic)?.setOnClickListener {
-            Toast.makeText(applicationContext, "🎤 Voice — coming soon", Toast.LENGTH_SHORT).show()
+            toggleVoiceRecording()
         }
         view.findViewById<View>(R.id.edge_btn_tone)?.setOnClickListener {
             Toast.makeText(applicationContext, "🎨 Tone — coming soon", Toast.LENGTH_SHORT).show()
@@ -453,6 +470,135 @@ class OverlayService : Service() {
             try { wm.updateViewLayout(v, p) } catch (e: Exception) {}
         }
         Log.d(TAG, "Edge collapsed to pill.")
+    }
+
+    // ── Voice Recording & STT (Phase 3) ───────────────────────────────
+
+    fun isVoiceRecording(): Boolean = ::voiceRecorder.isInitialized && voiceRecorder.isRecording()
+
+    fun toggleVoiceRecording() {
+        mainHandler.post {
+            if (!::voiceRecorder.isInitialized) {
+                voiceRecorder = VoiceRecorder(applicationContext)
+            }
+
+            if (voiceRecorder.isRecording()) {
+                // ── Stop Recording & Transcribe ──
+                val audioFile = voiceRecorder.stop()
+                IndicContextModule.instance?.emitRecordingStateChanged(false)
+
+                if (audioFile == null || audioFile.length() < 1000L) {
+                    updateMicUi(isRecording = false, isTranscribing = false)
+                    Toast.makeText(applicationContext, "Audio was too short.", Toast.LENGTH_SHORT).show()
+                    return@post
+                }
+
+                updateMicUi(isRecording = false, isTranscribing = true)
+                Toast.makeText(applicationContext, "⏳ Transcribing with Gnani Prisma...", Toast.LENGTH_SHORT).show()
+
+                GnaniSttClient.transcribe(audioFile) { result ->
+                    mainHandler.post {
+                        updateMicUi(isRecording = false, isTranscribing = false)
+                        result.onSuccess { transcript ->
+                            if (transcript.isNotEmpty()) {
+                                val injected = ChatAccessibilityService.instance?.injectText(transcript) ?: false
+                                if (injected) {
+                                    Toast.makeText(applicationContext, "✨ Injected: $transcript", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    copyToClipboard(transcript)
+                                    Toast.makeText(applicationContext, "📋 Copied: $transcript", Toast.LENGTH_SHORT).show()
+                                }
+                                IndicContextModule.instance?.emitVoiceTranscript(transcript, true)
+                            } else {
+                                Toast.makeText(applicationContext, "No speech recognized.", Toast.LENGTH_SHORT).show()
+                                IndicContextModule.instance?.emitVoiceTranscript("", false)
+                            }
+                        }.onFailure { err ->
+                            Log.e(TAG, "Gnani STT error: ${err.message}", err)
+                            Toast.makeText(applicationContext, "STT Failed: ${err.message}", Toast.LENGTH_LONG).show()
+                            IndicContextModule.instance?.emitVoiceTranscript("", false)
+                        }
+                    }
+                }
+            } else {
+                // ── Start Recording ──
+                val hasMicPermission = ContextCompat.checkSelfPermission(
+                    applicationContext,
+                    Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+
+                if (!hasMicPermission) {
+                    Toast.makeText(
+                        applicationContext,
+                        "Microphone permission not granted. Please allow in app settings.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@post
+                }
+
+                try {
+                    voiceRecorder.start()
+                    updateMicUi(isRecording = true, isTranscribing = false)
+                    IndicContextModule.instance?.emitRecordingStateChanged(true)
+                    Toast.makeText(applicationContext, "🎙️ Listening... Tap mic again to send", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to start VoiceRecorder: ${e.message}", e)
+                    updateMicUi(isRecording = false, isTranscribing = false)
+                    Toast.makeText(applicationContext, "Failed to start microphone: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun updateMicUi(isRecording: Boolean, isTranscribing: Boolean) {
+        this.isTranscribing = isTranscribing
+
+        // Update INPUT_BAR toolbar
+        toolbarView?.let { tb ->
+            val micBtn = tb.findViewById<ImageButton>(R.id.btn_mic)
+            when {
+                isRecording -> {
+                    micBtn?.setBackgroundResource(R.drawable.btn_bg_mic_recording)
+                    micBtn?.alpha = 1.0f
+                }
+                isTranscribing -> {
+                    micBtn?.setBackgroundResource(R.drawable.btn_bg_mic)
+                    micBtn?.alpha = 0.5f
+                }
+                else -> {
+                    micBtn?.setBackgroundResource(R.drawable.btn_bg_mic)
+                    micBtn?.alpha = 1.0f
+                }
+            }
+        }
+
+        // Update EDGE_SLIDER toolbar
+        edgeView?.let { ev ->
+            val edgeMicBtn = ev.findViewById<TextView>(R.id.edge_btn_mic)
+            when {
+                isRecording -> {
+                    edgeMicBtn?.setBackgroundResource(R.drawable.btn_bg_mic_recording)
+                    edgeMicBtn?.text = "🔴"
+                }
+                isTranscribing -> {
+                    edgeMicBtn?.setBackgroundResource(R.drawable.btn_bg_mic)
+                    edgeMicBtn?.text = "..."
+                }
+                else -> {
+                    edgeMicBtn?.setBackgroundResource(R.drawable.btn_bg_mic)
+                    edgeMicBtn?.text = "MIC"
+                }
+            }
+        }
+    }
+
+    private fun copyToClipboard(text: String) {
+        try {
+            val clip = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clip.setPrimaryClip(ClipData.newPlainText("gnani_stt", text))
+        } catch (e: Exception) {
+            Log.w(TAG, "copyToClipboard failed: ${e.message}")
+        }
     }
 
     // ── WindowManager params ──────────────────────────────────────────

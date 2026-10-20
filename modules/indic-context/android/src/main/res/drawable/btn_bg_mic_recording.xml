@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- btn_bg_mic_recording.xml - Active recording state: glowing red circle -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#DC2626" />
+    <stroke android:width="2dp" android:color="#FCA5A5" />
+</shape>
+
