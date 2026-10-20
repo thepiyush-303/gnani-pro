@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- menu_caret_bg.xml - Downward pointing triangle/caret for Language Popup -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#F01E1E20" />
+    <stroke android:width="1dp" android:color="#2E00E5FF" />
+</shape>
+

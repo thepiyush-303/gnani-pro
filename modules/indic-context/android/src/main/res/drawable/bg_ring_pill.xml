@@ -1,15 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- bg_ring_pill.xml - Collapsed 42x42dp disk with vibrant Indigo-to-Purple frosted gradient -->
+<!-- bg_ring_pill.xml - Collapsed 42x42dp disk with Dark Glassmorphism -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="oval">
-    <gradient
-        android:angle="135"
-        android:startColor="#6366F1"
-        android:endColor="#8B5CF6"
-        android:type="linear" />
+    <solid android:color="#D91E1E20" />
     <stroke
-        android:width="2dp"
-        android:color="#B4C6FC" />
+        android:width="1.2dp"
+        android:color="#4000E5FF" />
     <size
         android:width="42dp"
         android:height="42dp" />

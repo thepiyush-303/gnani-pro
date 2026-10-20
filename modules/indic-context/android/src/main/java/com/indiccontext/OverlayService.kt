@@ -1,6 +1,7 @@
 package com.indiccontext
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -26,6 +27,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -33,47 +35,48 @@ import android.widget.Toast
 import androidx.core.content.ContextCompat
 
 /**
- * OverlayService — Part 1 UI Structure & Behavior Implementation
+ * OverlayService — Dark Glassmorphism Edition
  *
- * 1. The Collapsed State (The Disk):
- *    - A 42x42dp circular ring pill docked to the screen edge flush above keyboard.
- *    - Vibrant indigo-to-purple gradient.
- *    - Tapping expands horizontally into the compact toolbar.
+ * Updates:
+ * 1. Full Draggability & Edge Snapping (The Ring & The Toolbar):
+ *    - Touches on ring or any non-button area of toolbar drag smoothly.
+ *    - On release, calculates X and snaps to left or right screen edge.
+ *    - Persists edge state ('left' | 'right').
  *
- * 2. The Expanded State (The Toolbar):
- *    - Compact horizontal pill (70-75% screen width).
- *    - 4 action buttons: Improve Text (✨), Fact Check (🔍), Icebreaker (🧊), Voice (🎙️).
- *    - Outer edge contains a distinct rectangular section with collapse handle (<).
- *    - Tapping the collapse handle shrinks the toolbar back to the circular disk.
+ * 2. Dynamic Layout Reversal:
+ *    - If on LEFT: Action buttons on left, collapse button on far right pointing left (<).
+ *    - If on RIGHT: Collapse button on far left pointing right (>), action buttons on right.
  *
- * 3. The Glide-Select Language Menu (Mic Button):
- *    - Regular tap: starts/stops dictation in the active language.
- *    - Long press / drag: pops up the language menu above the mic button.
- *    - Dragging finger over language tags highlights options with scale 1.08x.
- *    - Releasing finger over a tag selects it, updates badge on mic icon,
- *      and sets GnaniSttClient language.
+ * 3. Zero Layout Shift for Mic Language Popup + Downward Caret:
+ *    - WindowManager height and Y coordinate compensated so toolbar NEVER shifts.
+ *    - Rotated caret points directly at center of Mic button.
  *
- * Anti-flicker & Safe Hiding:
- *    - Completely hidden when copilot is disabled or keyboard drops.
+ * 4. Dark Glassmorphism Styling:
+ *    - Deep translucent charcoal (rgba(30, 30, 32, 0.85)) with thin border (rgba(255, 255, 255, 0.1)).
+ *    - Soft crisp white (#FAFAFA) icons.
+ *    - Soft Neon Cyan (#00E5FF) active & glide highlights.
  */
 class OverlayService : Service() {
+
+    enum class Edge { LEFT, RIGHT }
 
     private var windowManager: WindowManager? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // ── Overlay Window State ──
+    // ── Window State ──
     private var overlayRootView: View? = null
     private var overlayParams: WindowManager.LayoutParams? = null
     private var isOverlayShowing = false
     private var isExpanded = false
 
-    // Position debounce
+    // Edge docking & snapping
+    private var currentEdge: Edge = Edge.LEFT
     private var lastTargetY = -1
     private val POSITION_THRESHOLD_PX = 10
     private val POSITION_DEBOUNCE_MS = 60L
     private var pendingPositionUpdate: Runnable? = null
 
-    // ── Language & STT State ──
+    // ── Language State ──
     private var activeLanguageCode = "en-IN"
     private var activeLanguageBadge = "EN"
 
@@ -94,11 +97,9 @@ class OverlayService : Service() {
         private const val NOTIF_ID = 1001
         const val ACTION_STOP = "com.indiccontext.ACTION_STOP_OVERLAY"
 
-        /** Master toggle state controlled from dashboard. When false, overlay NEVER appears. */
         @Volatile
         var isCopilotActive: Boolean = false
 
-        /** Preserved mode variable for backward compatibility */
         @Volatile
         var currentMode: OverlayMode = OverlayMode.INPUT_BAR
 
@@ -114,8 +115,11 @@ class OverlayService : Service() {
         instance = this
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
-        // Load saved language preference
+        // Load persisted preferences
         val prefs = getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+        val savedEdge = prefs.getString("overlay_edge", "left") ?: "left"
+        currentEdge = if (savedEdge == "right") Edge.RIGHT else Edge.LEFT
+
         activeLanguageCode = prefs.getString("gnani_language", "en-IN") ?: "en-IN"
         activeLanguageBadge = when (activeLanguageCode) {
             "hi-IN" -> "HI"
@@ -137,7 +141,7 @@ class OverlayService : Service() {
                 }
             }
         }
-        Log.i(TAG, "Created. Lang=$activeLanguageCode ($activeLanguageBadge)")
+        Log.i(TAG, "Created. Edge=$currentEdge, Lang=$activeLanguageCode")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -149,7 +153,7 @@ class OverlayService : Service() {
         }
         isCopilotActive = true
         startForeground(NOTIF_ID, buildNotification())
-        Log.i(TAG, "Started. isCopilotActive=true — waiting for keyboard trigger.")
+        Log.i(TAG, "Started. isCopilotActive=true")
         return START_STICKY
     }
 
@@ -166,18 +170,12 @@ class OverlayService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    // ── Mode API (Backward Compatibility) ─────────────────────────────
-
     fun setMode(mode: OverlayMode) {
         currentMode = mode
     }
 
     // ── Show / Reposition Overlay ─────────────────────────────────────
 
-    /**
-     * Show (or reposition) the overlay above [inputBounds].
-     * Shows the collapsed 42x42dp disk by default unless already expanded in current session.
-     */
     fun showOverlay(inputBounds: Rect? = null) {
         if (!isCopilotActive) return
 
@@ -193,7 +191,6 @@ class OverlayService : Service() {
                 (screenH * 0.58f).toInt()
             }
 
-            // If already showing: reposition smoothly (debounced)
             if (isOverlayShowing && overlayRootView != null && overlayParams != null) {
                 val delta = Math.abs(targetY - lastTargetY)
                 if (delta <= POSITION_THRESHOLD_PX) return@post
@@ -211,7 +208,7 @@ class OverlayService : Service() {
                 return@post
             }
 
-            // First show: inflate unified layout and mount
+            // First show: inflate and mount
             val view = inflateOverlayView(wm)
             val params = buildOverlayParams(targetY, isExpanded)
             try {
@@ -220,25 +217,19 @@ class OverlayService : Service() {
                 overlayParams = params
                 isOverlayShowing = true
                 lastTargetY = targetY
-                Log.i(TAG, "Overlay shown at y=$targetY (isExpanded=$isExpanded)")
+                applyEdgeLayout(currentEdge)
+                Log.i(TAG, "Overlay shown at y=$targetY (edge=$currentEdge)")
             } catch (e: Exception) {
                 Log.e(TAG, "addView(overlay) failed: ${e.message}")
             }
         }
     }
 
-    /** Compatibility alias */
     fun showToolbar(inputBounds: Rect? = null) = showOverlay(inputBounds)
-
-    /** Compatibility alias */
     fun showEdgePill() = showOverlay(null)
 
     // ── Hide Overlay ──────────────────────────────────────────────────
 
-    /**
-     * Completely removes the overlay from the screen.
-     * When hidden, resets expanded state so it reopens as the disk next time.
-     */
     fun hideOverlay() {
         mainHandler.post {
             pendingPositionUpdate?.let { mainHandler.removeCallbacks(it) }
@@ -261,8 +252,38 @@ class OverlayService : Service() {
 
     fun hideToolbar() = hideOverlay()
     fun hideEdgePill() = hideOverlay()
-
     fun isToolbarShowing(): Boolean = isOverlayShowing
+
+    // ── Dynamic Edge Layout Reversal ──────────────────────────────────
+
+    private fun applyEdgeLayout(edge: Edge) {
+        val root = overlayRootView ?: return
+        val toolbar = root.findViewById<LinearLayout>(R.id.toolbar_container) ?: return
+        val collapseBtn = root.findViewById<FrameLayout>(R.id.btn_collapse_handle) ?: return
+        val collapseArrow = root.findViewById<TextView>(R.id.collapse_arrow) ?: return
+        val divider = root.findViewById<View>(R.id.toolbar_divider) ?: return
+        val actionButtons = root.findViewById<LinearLayout>(R.id.action_buttons_container) ?: return
+
+        toolbar.removeView(collapseBtn)
+        toolbar.removeView(divider)
+        toolbar.removeView(actionButtons)
+
+        if (edge == Edge.LEFT) {
+            // LEFT edge: Action buttons on left -> divider -> collapse button on far right (<)
+            toolbar.addView(actionButtons)
+            toolbar.addView(divider)
+            toolbar.addView(collapseBtn)
+            collapseArrow.text = "‹"
+            collapseBtn.setBackgroundResource(R.drawable.btn_collapse_bg_right)
+        } else {
+            // RIGHT edge: Collapse button on far left (>) -> divider -> action buttons on right
+            toolbar.addView(collapseBtn)
+            toolbar.addView(divider)
+            toolbar.addView(actionButtons)
+            collapseArrow.text = "›"
+            collapseBtn.setBackgroundResource(R.drawable.btn_collapse_bg_left)
+        }
+    }
 
     // ── Expand & Collapse Transitions ─────────────────────────────────
 
@@ -271,36 +292,57 @@ class OverlayService : Service() {
         val view = overlayRootView ?: return
         val params = overlayParams ?: return
         val screenW = resources.displayMetrics.widthPixels
+        val density = resources.displayMetrics.density
+        val margin = (8 * density).toInt()
 
         isExpanded = true
-        // Compact toolbar width: ~72% of screen width
-        params.width = (screenW * 0.72f).toInt()
+        val toolbarW = (screenW * 0.72f).toInt()
+        params.width = toolbarW
+
+        // Edge coordinate calculation
+        if (currentEdge == Edge.RIGHT) {
+            params.x = screenW - toolbarW - margin
+        } else {
+            params.x = margin
+        }
 
         val disk = view.findViewById<View>(R.id.disk_container)
         val toolbar = view.findViewById<View>(R.id.toolbar_container)
+
+        applyEdgeLayout(currentEdge)
 
         disk?.visibility = View.GONE
         toolbar?.visibility = View.VISIBLE
         toolbar?.alpha = 0f
         toolbar?.scaleX = 0.4f
-        toolbar?.pivotX = 0f
+        toolbar?.pivotX = if (currentEdge == Edge.LEFT) 0f else toolbarW.toFloat()
         toolbar?.animate()?.alpha(1f)?.scaleX(1f)?.setDuration(220)?.start()
 
         try { wm.updateViewLayout(view, params) } catch (e: Exception) {}
-        Log.d(TAG, "Expanded into 72% toolbar.")
+        Log.d(TAG, "Expanded into 72% toolbar at $currentEdge edge.")
     }
 
     private fun collapseToDisk() {
         val wm = windowManager ?: return
         val view = overlayRootView ?: return
         val params = overlayParams ?: return
+        val screenW = resources.displayMetrics.widthPixels
+        val density = resources.displayMetrics.density
+        val margin = (8 * density).toInt()
+        val diskW = (42 * density).toInt()
 
         isExpanded = false
         params.width = WindowManager.LayoutParams.WRAP_CONTENT
 
+        if (currentEdge == Edge.RIGHT) {
+            params.x = screenW - diskW - margin
+        } else {
+            params.x = margin
+        }
+
         val disk = view.findViewById<View>(R.id.disk_container)
         val toolbar = view.findViewById<View>(R.id.toolbar_container)
-        val langMenu = view.findViewById<View>(R.id.language_menu_container)
+        val langMenu = view.findViewById<View>(R.id.language_popup_wrapper)
 
         langMenu?.visibility = View.GONE
         toolbar?.visibility = View.GONE
@@ -311,7 +353,43 @@ class OverlayService : Service() {
         disk?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(200)?.start()
 
         try { wm.updateViewLayout(view, params) } catch (e: Exception) {}
-        Log.d(TAG, "Collapsed back into circular disk.")
+        Log.d(TAG, "Collapsed back into circular disk at $currentEdge edge.")
+    }
+
+    // ── Edge Snapping Animation ──
+
+    private fun snapToNearestEdge(releaseRawX: Float) {
+        val wm = windowManager ?: return
+        val view = overlayRootView ?: return
+        val params = overlayParams ?: return
+        val screenW = resources.displayMetrics.widthPixels
+        val density = resources.displayMetrics.density
+        val margin = (8 * density).toInt()
+
+        val newEdge = if (releaseRawX < screenW / 2) Edge.LEFT else Edge.RIGHT
+        currentEdge = newEdge
+
+        // Persist edge choice
+        getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putString("overlay_edge", if (newEdge == Edge.LEFT) "left" else "right")
+            .apply()
+
+        applyEdgeLayout(newEdge)
+
+        val targetWidth = if (isExpanded) (screenW * 0.72f).toInt() else (42 * density).toInt()
+        val startX = params.x
+        val endX = if (newEdge == Edge.LEFT) margin else (screenW - targetWidth - margin)
+
+        val animator = ValueAnimator.ofInt(startX, endX).apply {
+            duration = 180L
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { anim ->
+                params.x = anim.animatedValue as Int
+                try { wm.updateViewLayout(view, params) } catch (e: Exception) {}
+            }
+        }
+        animator.start()
     }
 
     // ── View Inflation & Gesture Wiring ────────────────────────────────
@@ -323,9 +401,7 @@ class OverlayService : Service() {
         val toolbarContainer = view.findViewById<LinearLayout>(R.id.toolbar_container)
         val langBadge = view.findViewById<TextView>(R.id.txt_lang_badge)
         val collapseHandle = view.findViewById<FrameLayout>(R.id.btn_collapse_handle)
-        val dragBar = view.findViewById<View>(R.id.drag_bar)
 
-        // Set initial visibility
         if (isExpanded) {
             diskContainer?.visibility = View.GONE
             toolbarContainer?.visibility = View.VISIBLE
@@ -336,34 +412,42 @@ class OverlayService : Service() {
 
         langBadge?.text = activeLanguageBadge
 
-        // ── 1. The Collapsed Disk: Tap to expand, or drag ──
-        var diskStartX = 0f
-        var diskStartY = 0f
-        var isDiskDragging = false
+        // ── 1. Full Draggability for the Disk ──
+        var diskDownX = 0f
+        var diskDownY = 0f
+        var diskInitialParamX = 0
+        var diskInitialParamY = 0
+        var isDiskDrag = false
 
         diskContainer?.setOnTouchListener { _, ev ->
             when (ev.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    diskStartX = ev.rawX
-                    diskStartY = ev.rawY
-                    isDiskDragging = false
+                    val p = overlayParams ?: return@setOnTouchListener false
+                    diskDownX = ev.rawX
+                    diskDownY = ev.rawY
+                    diskInitialParamX = p.x
+                    diskInitialParamY = p.y
+                    isDiskDrag = false
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = Math.abs(ev.rawX - diskStartX)
-                    val dy = Math.abs(ev.rawY - diskStartY)
-                    if (dx > 10 || dy > 10) {
-                        isDiskDragging = true
+                    val dx = ev.rawX - diskDownX
+                    val dy = ev.rawY - diskDownY
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > 10.0) {
+                        isDiskDrag = true
                         val p = overlayParams ?: return@setOnTouchListener false
-                        p.y = (p.y + (ev.rawY - diskStartY).toInt()).coerceIn(0, resources.displayMetrics.heightPixels - 100)
+                        p.x = (diskInitialParamX + dx.toInt())
+                        val screenH = resources.displayMetrics.heightPixels
+                        p.y = (diskInitialParamY + dy.toInt()).coerceIn(0, screenH - 100)
                         lastTargetY = p.y
-                        diskStartY = ev.rawY
                         try { wm.updateViewLayout(view, p) } catch (e: Exception) {}
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!isDiskDragging) {
+                    if (isDiskDrag) {
+                        snapToNearestEdge(ev.rawX)
+                    } else {
                         expandToToolbar()
                     }
                     true
@@ -372,38 +456,51 @@ class OverlayService : Service() {
             }
         }
 
-        // ── 2. The Collapse Handle: Tap to shrink back to disk ──
-        collapseHandle?.setOnClickListener {
-            collapseToDisk()
-        }
+        // ── 2. Full Draggability for the Toolbar Background ──
+        var tbDownX = 0f
+        var tbDownY = 0f
+        var tbInitialParamX = 0
+        var tbInitialParamY = 0
+        var isTbDrag = false
 
-        // ── 3. Drag Bar for toolbar dragging ──
-        var initialX = 0
-        var initialY = 0
-        var initialTouchX = 0f
-        var initialTouchY = 0f
-
-        dragBar?.setOnTouchListener { _, ev ->
+        toolbarContainer?.setOnTouchListener { _, ev ->
             when (ev.action) {
                 MotionEvent.ACTION_DOWN -> {
                     val p = overlayParams ?: return@setOnTouchListener false
-                    initialX = p.x
-                    initialY = p.y
-                    initialTouchX = ev.rawX
-                    initialTouchY = ev.rawY
+                    tbDownX = ev.rawX
+                    tbDownY = ev.rawY
+                    tbInitialParamX = p.x
+                    tbInitialParamY = p.y
+                    isTbDrag = false
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val p = overlayParams ?: return@setOnTouchListener false
-                    p.x = initialX + (ev.rawX - initialTouchX).toInt()
-                    val screenH = resources.displayMetrics.heightPixels
-                    p.y = (initialY + (ev.rawY - initialTouchY).toInt()).coerceIn(0, screenH - 100)
-                    lastTargetY = p.y
-                    try { wm.updateViewLayout(view, p) } catch (e: Exception) {}
+                    val dx = ev.rawX - tbDownX
+                    val dy = ev.rawY - tbDownY
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > 12.0) {
+                        isTbDrag = true
+                        val p = overlayParams ?: return@setOnTouchListener false
+                        p.x = (tbInitialParamX + dx.toInt())
+                        val screenH = resources.displayMetrics.heightPixels
+                        p.y = (tbInitialParamY + dy.toInt()).coerceIn(0, screenH - 100)
+                        lastTargetY = p.y
+                        try { wm.updateViewLayout(view, p) } catch (e: Exception) {}
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (isTbDrag) {
+                        snapToNearestEdge(ev.rawX)
+                    }
                     true
                 }
                 else -> false
             }
+        }
+
+        // ── 3. Collapse Handle ──
+        collapseHandle?.setOnClickListener {
+            collapseToDisk()
         }
 
         // ── Action Buttons ──
@@ -417,7 +514,7 @@ class OverlayService : Service() {
             Toast.makeText(applicationContext, "🧊 Icebreaker — coming soon", Toast.LENGTH_SHORT).show()
         }
 
-        // ── 4. The Touch & Glide Language Selector on Mic Button ──
+        // ── 4. Touch & Glide Language Selector with Caret ──
         setupGlideLanguageSelector(view)
 
         return view
@@ -425,14 +522,12 @@ class OverlayService : Service() {
 
     /**
      * Component 3: Glide-Select Language Menu on Mic button
-     * - Tap (< 300ms): Starts/stops voice dictation.
-     * - Long-press (> 300ms): Pops up vertical language menu.
-     * - Drag: Highlights hovered language tag.
-     * - Release: Selects highlighted language and updates mic badge.
+     * - Absolute Y positioning to avoid displacing toolbar.
+     * - Downward pointing Caret triangle aligned to Mic button.
      */
     private fun setupGlideLanguageSelector(rootView: View) {
         val btnMic = rootView.findViewById<View>(R.id.btn_mic) ?: return
-        val langMenu = rootView.findViewById<LinearLayout>(R.id.language_menu_container)
+        val popupWrapper = rootView.findViewById<LinearLayout>(R.id.language_popup_wrapper)
         val langBadge = rootView.findViewById<TextView>(R.id.txt_lang_badge)
 
         val langPills = listOf(
@@ -448,6 +543,7 @@ class OverlayService : Service() {
         var isLongPressActive = false
         var longPressRunnable: Runnable? = null
         var currentlyHoveredPill: TextView? = null
+        var originalOverlayY = 0
 
         btnMic.setOnTouchListener { v, ev ->
             when (ev.action) {
@@ -455,15 +551,47 @@ class OverlayService : Service() {
                     isLongPressActive = false
                     currentlyHoveredPill = null
 
-                    // 300ms long press timer
                     val r = Runnable {
                         isLongPressActive = true
                         v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        langMenu?.visibility = View.VISIBLE
-                        langMenu?.alpha = 0f
-                        langMenu?.scaleY = 0.8f
-                        langMenu?.pivotY = langMenu.height.toFloat()
-                        langMenu?.animate()?.alpha(1f)?.scaleY(1f)?.setDuration(160)?.start()
+
+                        // Position Caret & Menu directly over Mic icon
+                        val micLoc = IntArray(2)
+                        btnMic.getLocationOnScreen(micLoc)
+                        val density = resources.displayMetrics.density
+                        val menuWidth = (200 * density).toInt()
+
+                        // Calculate horizontal alignment so caret is centered above Mic
+                        val micCenterX = micLoc[0] + (btnMic.width / 2)
+                        val screenW = resources.displayMetrics.widthPixels
+                        val menuX = (micCenterX - (menuWidth / 2)).coerceIn(
+                            (8 * density).toInt(),
+                            screenW - menuWidth - (8 * density).toInt()
+                        )
+
+                        popupWrapper?.x = menuX.toFloat() - (overlayParams?.x ?: 0)
+
+                        // Compensate WindowManager Y so toolbar DOES NOT SHIFT DOWN
+                        val wm = windowManager
+                        val p = overlayParams
+                        if (wm != null && p != null) {
+                            originalOverlayY = p.y
+                            popupWrapper?.measure(
+                                View.MeasureSpec.makeMeasureSpec(menuWidth, View.MeasureSpec.EXACTLY),
+                                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                            )
+                            val popupH = popupWrapper?.measuredHeight ?: (280 * density).toInt()
+
+                            // Shift window up by popup height so toolbar stays rigidly fixed!
+                            p.y = (p.y - popupH).coerceAtLeast(0)
+                            try { wm.updateViewLayout(rootView, p) } catch (e: Exception) {}
+                        }
+
+                        popupWrapper?.visibility = View.VISIBLE
+                        popupWrapper?.alpha = 0f
+                        popupWrapper?.scaleY = 0.8f
+                        popupWrapper?.pivotY = popupWrapper.height.toFloat()
+                        popupWrapper?.animate()?.alpha(1f)?.scaleY(1f)?.setDuration(160)?.start()
                     }
                     longPressRunnable = r
                     mainHandler.postDelayed(r, 300L)
@@ -485,9 +613,8 @@ class OverlayService : Service() {
                             val right = left + pill.width
                             val bottom = top + pill.height
 
-                            // Generous touch hit box for easy glide
-                            if (rawX in (left.toFloat() - 40)..(right.toFloat() + 40) &&
-                                rawY in (top.toFloat() - 6)..(bottom.toFloat() + 6)) {
+                            if (rawX in (left.toFloat() - 35)..(right.toFloat() + 35) &&
+                                rawY in (top.toFloat() - 4)..(bottom.toFloat() + 4)) {
                                 hovered = pill
                                 break
                             }
@@ -501,12 +628,12 @@ class OverlayService : Service() {
                                     pill.setBackgroundResource(R.drawable.language_pill_selected_bg)
                                     pill.animate().scaleX(1.06f).scaleY(1.06f).setDuration(80).start()
                                     pill.setTypeface(null, Typeface.BOLD)
-                                    pill.setTextColor(Color.WHITE)
+                                    pill.setTextColor(Color.parseColor("#00E5FF"))
                                 } else {
                                     pill.setBackgroundResource(R.drawable.language_pill_bg)
                                     pill.animate().scaleX(1.0f).scaleY(1.0f).setDuration(80).start()
                                     pill.setTypeface(null, Typeface.NORMAL)
-                                    pill.setTextColor(Color.parseColor("#F8FAFC"))
+                                    pill.setTextColor(Color.parseColor("#FAFAFA"))
                                 }
                             }
                         }
@@ -518,7 +645,6 @@ class OverlayService : Service() {
                     longPressRunnable = null
 
                     if (isLongPressActive) {
-                        // User released finger after gliding
                         currentlyHoveredPill?.let { selectedPill ->
                             val tag = selectedPill.tag as? String // e.g. "mr-IN:MR"
                             if (tag != null) {
@@ -531,7 +657,6 @@ class OverlayService : Service() {
                                 GnaniSttClient.currentLanguage = code
                                 langBadge?.text = badge
 
-                                // Persist user language preference
                                 getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
                                     .edit()
                                     .putString("gnani_language", code)
@@ -541,9 +666,15 @@ class OverlayService : Service() {
                             }
                         }
 
-                        // Close popup
-                        langMenu?.animate()?.alpha(0f)?.setDuration(150)?.withEndAction {
-                            langMenu.visibility = View.GONE
+                        // Restore original WindowManager Y to avoid drift
+                        popupWrapper?.animate()?.alpha(0f)?.setDuration(120)?.withEndAction {
+                            popupWrapper.visibility = View.GONE
+                            val wm = windowManager
+                            val p = overlayParams
+                            if (wm != null && p != null && originalOverlayY > 0) {
+                                p.y = originalOverlayY
+                                try { wm.updateViewLayout(rootView, p) } catch (e: Exception) {}
+                            }
                         }?.start()
 
                         isLongPressActive = false
@@ -559,7 +690,7 @@ class OverlayService : Service() {
         }
     }
 
-    // ── Voice Recording & STT (Phase 3) ───────────────────────────────
+    // ── Voice Recording & STT ─────────────────────────────────────────
 
     fun isVoiceRecording(): Boolean = ::voiceRecorder.isInitialized && voiceRecorder.isRecording()
 
@@ -570,7 +701,6 @@ class OverlayService : Service() {
             }
 
             if (voiceRecorder.isRecording()) {
-                // ── Stop Recording & Transcribe ──
                 val audioFile = voiceRecorder.stop()
                 IndicContextModule.instance?.emitRecordingStateChanged(false)
 
@@ -608,7 +738,6 @@ class OverlayService : Service() {
                     }
                 }
             } else {
-                // ── Start Recording ──
                 val hasMicPermission = ContextCompat.checkSelfPermission(
                     applicationContext,
                     Manifest.permission.RECORD_AUDIO
@@ -651,12 +780,12 @@ class OverlayService : Service() {
                     micContainer?.alpha = 1.0f
                 }
                 isTranscribing -> {
-                    micContainer?.setBackgroundResource(R.drawable.btn_bg_mic)
+                    micContainer?.setBackgroundResource(R.drawable.btn_bg_glass)
                     micIconText?.text = "..."
                     micContainer?.alpha = 0.5f
                 }
                 else -> {
-                    micContainer?.setBackgroundResource(R.drawable.btn_bg_mic)
+                    micContainer?.setBackgroundResource(R.drawable.btn_bg_glass)
                     micIconText?.text = "🎙️"
                     micContainer?.alpha = 1.0f
                 }
@@ -695,7 +824,11 @@ class OverlayService : Service() {
         else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
         val screenW = resources.displayMetrics.widthPixels
+        val density = resources.displayMetrics.density
+        val margin = (8 * density).toInt()
+
         val width = if (expanded) (screenW * 0.72f).toInt() else WindowManager.LayoutParams.WRAP_CONTENT
+        val xPos = if (currentEdge == Edge.LEFT) margin else (screenW - (if (expanded) width else (42 * density).toInt()) - margin)
 
         return WindowManager.LayoutParams(
             width,
@@ -706,7 +839,7 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = (8 * resources.displayMetrics.density).toInt() // subtle margin from left edge
+            x = xPos
             y = yPos
         }
     }
