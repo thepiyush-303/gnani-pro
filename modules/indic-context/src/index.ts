@@ -283,6 +283,15 @@ export function addRecordingStateListener(
   return emitter.addListener<RecordingStateEvent>('onRecordingStateChanged', listener);
 }
 
+/**
+ * Fires when the overlay copilot is disabled via Drag-to-Disable.
+ */
+export function addCopilotDisabledListener(
+  listener: () => void,
+) {
+  return emitter.addListener('onCopilotDisabled', listener);
+}
+
 // ─── Default export (convenience object) ─────────────────────────────────────
 
 const IndicContext = {
@@ -306,6 +315,7 @@ const IndicContext = {
   addInputBlurListener,
   addVoiceTranscriptListener,
   addRecordingStateListener,
+  addCopilotDisabledListener,
 };
 
 export default IndicContext;

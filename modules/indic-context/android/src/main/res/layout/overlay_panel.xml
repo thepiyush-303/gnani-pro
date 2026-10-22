@@ -2,9 +2,9 @@
 <!--
   overlay_panel.xml — Assistant Overlay (Dark Glassmorphism Edition)
   Features:
-    1. language_popup_wrapper — Floating language list + Caret pointing to Mic icon
-    2. disk_container — 42x42dp Dark Glass circular ring (draggable + edge snapping)
-    3. toolbar_container — 72% Dark Glass compact toolbar with dynamic edge reversal (< on right, > on left)
+    1. disk_container — 42x42dp Dark Glass circular ring (draggable + edge snapping)
+    2. toolbar_container — Dark Glass compact toolbar with dynamic edge reversal (< on right, > on left)
+    3. language_popup_wrapper — Floating language list + Caret pointing to Mic icon (zIndex/elevation above toolbar)
 -->
 <FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
@@ -16,16 +16,198 @@
     android:clickable="false"
     android:focusable="false">
 
+    <!-- ── Component 1: The Collapsed Disk (42x42dp Dark Glass) ── -->
+    <FrameLayout
+        android:id="@+id/disk_container"
+        android:layout_width="42dp"
+        android:layout_height="42dp"
+        android:layout_gravity="bottom|start"
+        android:background="@drawable/bg_ring_pill"
+        android:clickable="true"
+        android:focusable="true"
+        android:elevation="10dp">
+
+        <TextView
+            android:id="@+id/disk_spark"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:clickable="false"
+            android:focusable="false"
+            android:text="✨"
+            android:textColor="#FAFAFA"
+            android:textSize="18sp" />
+
+    </FrameLayout>
+
+    <!-- ── Component 2: The Expanded Toolbar (Dark Glass) ── -->
+    <LinearLayout
+        android:id="@+id/toolbar_container"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:layout_gravity="bottom|start"
+        android:background="@drawable/overlay_bg"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:elevation="12dp"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:paddingLeft="4dp"
+        android:paddingRight="4dp"
+        android:clickable="true"
+        android:focusable="false"
+        android:visibility="gone">
+
+        <!-- ── Action Buttons Container (✨, 🔍, 🧊, 🎙️) ── -->
+        <LinearLayout
+            android:id="@+id/action_buttons_container"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:paddingLeft="2dp"
+            android:paddingRight="2dp">
+
+            <!-- 1. ✨ Sparkle (Improve Text) -->
+            <FrameLayout
+                android:id="@+id/btn_improve"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/btn_bg_glass"
+                android:clickable="true"
+                android:focusable="true">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="✨"
+                    android:textColor="#FAFAFA"
+                    android:textSize="17sp" />
+            </FrameLayout>
+
+            <!-- 2. 🔍 Fact Check -->
+            <FrameLayout
+                android:id="@+id/btn_factcheck"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/btn_bg_glass"
+                android:clickable="true"
+                android:focusable="true">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="🔍"
+                    android:textColor="#FAFAFA"
+                    android:textSize="16sp" />
+            </FrameLayout>
+
+            <!-- 3. 🧊 Icebreaker -->
+            <FrameLayout
+                android:id="@+id/btn_icebreaker"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/btn_bg_glass"
+                android:clickable="true"
+                android:focusable="true">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="🧊"
+                    android:textColor="#FAFAFA"
+                    android:textSize="16sp" />
+            </FrameLayout>
+
+            <!-- 4. 🎙️ Microphone (Voice Dictation + Glide Menu) -->
+            <FrameLayout
+                android:id="@+id/btn_mic"
+                android:layout_width="42dp"
+                android:layout_height="38dp"
+                android:background="@drawable/btn_bg_glass"
+                android:clickable="true"
+                android:focusable="true">
+
+                <TextView
+                    android:id="@+id/mic_icon_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="🎙️"
+                    android:textColor="#FAFAFA"
+                    android:textSize="17sp" />
+
+                <!-- Language Badge (Soft Neon Cyan) -->
+                <TextView
+                    android:id="@+id/txt_lang_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="bottom|end"
+                    android:layout_marginBottom="1dp"
+                    android:layout_marginEnd="1dp"
+                    android:background="@drawable/badge_lang_bg"
+                    android:paddingStart="3dp"
+                    android:paddingEnd="3dp"
+                    android:paddingTop="1dp"
+                    android:paddingBottom="1dp"
+                    android:text="EN"
+                    android:textColor="#00E5FF"
+                    android:textSize="7sp"
+                    android:textStyle="bold" />
+            </FrameLayout>
+
+        </LinearLayout>
+
+        <!-- Vertical Divider -->
+        <View
+            android:id="@+id/toolbar_divider"
+            android:layout_width="1dp"
+            android:layout_height="22dp"
+            android:background="#26FFFFFF"
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="2dp" />
+
+        <!-- ── Collapse Button Handle (< on right, > on left) ── -->
+        <FrameLayout
+            android:id="@+id/btn_collapse_handle"
+            android:layout_width="34dp"
+            android:layout_height="match_parent"
+            android:background="@drawable/btn_collapse_bg_right"
+            android:clickable="true"
+            android:focusable="true">
+
+            <TextView
+                android:id="@+id/collapse_arrow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text="‹"
+                android:textColor="#FAFAFA"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+        </FrameLayout>
+
+    </LinearLayout>
+
     <!-- ── Component 3: Glide-Select Language Menu Popup with Caret ── -->
+    <!-- Declared AFTER toolbar in FrameLayout + elevation 32dp for strict top Z-Index -->
     <LinearLayout
         android:id="@+id/language_popup_wrapper"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="top|start"
+        android:layout_gravity="bottom|start"
+        android:layout_marginBottom="56dp"
         android:orientation="vertical"
-        android:gravity="center_horizontal"
         android:clipChildren="false"
         android:clipToPadding="false"
+        android:elevation="32dp"
+        android:translationZ="10dp"
         android:visibility="gone">
 
         <!-- Main Language Card -->
@@ -36,7 +218,7 @@
             android:background="@drawable/language_menu_bg"
             android:orientation="vertical"
             android:padding="8dp"
-            android:elevation="18dp">
+            android:elevation="32dp">
 
             <TextView
                 android:layout_width="wrap_content"
@@ -156,219 +338,15 @@
 
         </LinearLayout>
 
-        <!-- Downward Caret (Triangle) pointing directly at Mic icon -->
-        <View
+        <!-- Downward Caret (Vector Triangle) pointing directly at Mic icon below -->
+        <ImageView
             android:id="@+id/menu_caret"
-            android:layout_width="12dp"
-            android:layout_height="12dp"
-            android:layout_marginTop="-6dp"
-            android:background="@drawable/menu_caret_bg"
-            android:rotation="45"
-            android:elevation="19dp" />
-
-    </LinearLayout>
-
-    <!-- ── Component 1: The Collapsed Disk (42x42dp Dark Glass) ── -->
-    <FrameLayout
-        android:id="@+id/disk_container"
-        android:layout_width="42dp"
-        android:layout_height="42dp"
-        android:layout_gravity="bottom|start"
-        android:background="@drawable/bg_ring_pill"
-        android:clickable="true"
-        android:focusable="true"
-        android:elevation="10dp">
-
-        <TextView
-            android:id="@+id/disk_spark"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:clickable="false"
-            android:focusable="false"
-            android:text="✨"
-            android:textColor="#FAFAFA"
-            android:textSize="18sp" />
-
-        <!-- Optional message badge -->
-        <TextView
-            android:id="@+id/disk_context_badge"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="top|end"
-            android:background="@drawable/badge_bg"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
-            android:textColor="#FAFAFA"
-            android:textSize="8sp"
-            android:fontFamily="sans-serif-medium"
-            android:visibility="gone"
-            android:text="0" />
-
-    </FrameLayout>
-
-    <!-- ── Component 2: The Expanded Toolbar (72% Width Dark Glass) ── -->
-    <LinearLayout
-        android:id="@+id/toolbar_container"
-        android:layout_width="wrap_content"
-        android:layout_height="48dp"
-        android:layout_gravity="bottom|start"
-        android:background="@drawable/overlay_bg"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:elevation="12dp"
-        android:paddingStart="4dp"
-        android:paddingEnd="4dp"
-        android:clickable="true"
-        android:focusable="false"
-        android:visibility="gone">
-
-        <!-- ── Action Buttons Container (✨, 🔍, 🧊, 🎙️) ── -->
-        <LinearLayout
-            android:id="@+id/action_buttons_container"
-            android:layout_width="wrap_content"
-            android:layout_height="match_parent"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp">
-
-            <!-- 1. ✨ Sparkle (Improve Text) -->
-            <FrameLayout
-                android:id="@+id/btn_improve"
-                android:layout_width="38dp"
-                android:layout_height="38dp"
-                android:layout_marginEnd="6dp"
-                android:background="@drawable/btn_bg_glass"
-                android:clickable="true"
-                android:focusable="true">
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center"
-                    android:text="✨"
-                    android:textColor="#FAFAFA"
-                    android:textSize="17sp" />
-            </FrameLayout>
-
-            <!-- 2. 🔍 Fact Check -->
-            <FrameLayout
-                android:id="@+id/btn_factcheck"
-                android:layout_width="38dp"
-                android:layout_height="38dp"
-                android:layout_marginEnd="6dp"
-                android:background="@drawable/btn_bg_glass"
-                android:clickable="true"
-                android:focusable="true">
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center"
-                    android:text="🔍"
-                    android:textColor="#FAFAFA"
-                    android:textSize="16sp" />
-            </FrameLayout>
-
-            <!-- 3. 🧊 Icebreaker -->
-            <FrameLayout
-                android:id="@+id/btn_icebreaker"
-                android:layout_width="38dp"
-                android:layout_height="38dp"
-                android:layout_marginEnd="6dp"
-                android:background="@drawable/btn_bg_glass"
-                android:clickable="true"
-                android:focusable="true">
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center"
-                    android:text="🧊"
-                    android:textColor="#FAFAFA"
-                    android:textSize="16sp" />
-            </FrameLayout>
-
-            <!-- 4. 🎙️ Microphone (Voice Dictation + Glide Menu) -->
-            <FrameLayout
-                android:id="@+id/btn_mic"
-                android:layout_width="42dp"
-                android:layout_height="38dp"
-                android:background="@drawable/btn_bg_glass"
-                android:clickable="true"
-                android:focusable="true">
-
-                <TextView
-                    android:id="@+id/mic_icon_text"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center"
-                    android:text="🎙️"
-                    android:textColor="#FAFAFA"
-                    android:textSize="17sp" />
-
-                <!-- Language Badge (Soft Neon Cyan) -->
-                <TextView
-                    android:id="@+id/txt_lang_badge"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="bottom|end"
-                    android:layout_marginBottom="1dp"
-                    android:layout_marginEnd="1dp"
-                    android:background="@drawable/badge_lang_bg"
-                    android:paddingStart="3dp"
-                    android:paddingEnd="3dp"
-                    android:paddingTop="1dp"
-                    android:paddingBottom="1dp"
-                    android:text="EN"
-                    android:textColor="#00E5FF"
-                    android:textSize="7sp"
-                    android:textStyle="bold" />
-            </FrameLayout>
-
-            <!-- Context message count badge (optional) -->
-            <TextView
-                android:id="@+id/context_badge"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:background="@drawable/badge_bg"
-                android:paddingStart="5dp"
-                android:paddingEnd="5dp"
-                android:textColor="#FAFAFA"
-                android:textSize="9sp"
-                android:fontFamily="sans-serif-medium"
-                android:visibility="gone"
-                android:text="0" />
-
-        </LinearLayout>
-
-        <!-- Vertical Divider -->
-        <View
-            android:id="@+id/toolbar_divider"
-            android:layout_width="1dp"
-            android:layout_height="22dp"
-            android:background="#26FFFFFF"
-            android:layout_marginStart="2dp"
-            android:layout_marginEnd="2dp" />
-
-        <!-- ── Collapse Button Handle (< on right, > on left) ── -->
-        <FrameLayout
-            android:id="@+id/btn_collapse_handle"
-            android:layout_width="34dp"
-            android:layout_height="match_parent"
-            android:background="@drawable/btn_collapse_bg_right"
-            android:clickable="true"
-            android:focusable="true">
-
-            <TextView
-                android:id="@+id/collapse_arrow"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:text="‹"
-                android:textColor="#FAFAFA"
-                android:textSize="20sp"
-                android:textStyle="bold" />
-
-        </FrameLayout>
+            android:layout_width="14dp"
+            android:layout_height="8dp"
+            android:layout_gravity="start"
+            android:src="@drawable/ic_caret_down"
+            android:elevation="33dp"
+            android:translationZ="12dp" />
 
     </LinearLayout>
 

@@ -67,6 +67,7 @@ class IndicContextModule : Module() {
             "onInputFieldBlurred",
             "onVoiceTranscript",
             "onRecordingStateChanged",
+            "onCopilotDisabled",
         )
 
         // ── Permissions ───────────────────────────────────────────
@@ -313,6 +314,14 @@ class IndicContextModule : Module() {
             sendEvent("onRecordingStateChanged", mapOf("isRecording" to isRecording))
         } catch (e: Exception) {
             android.util.Log.w("IndicContextModule", "emitRecordingStateChanged: ${e.message}")
+        }
+    }
+
+    fun emitCopilotDisabled() {
+        try {
+            sendEvent("onCopilotDisabled", emptyMap<String, Any>())
+        } catch (e: Exception) {
+            android.util.Log.w("IndicContextModule", "emitCopilotDisabled: ${e.message}")
         }
     }
 }

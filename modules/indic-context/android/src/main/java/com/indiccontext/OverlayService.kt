@@ -26,6 +26,7 @@ import android.view.HapticFeedbackConstants
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
@@ -40,21 +41,20 @@ import androidx.core.content.ContextCompat
  * Updates:
  * 1. Full Draggability & Edge Snapping (The Ring & The Toolbar):
  *    - Touches on ring or any non-button area of toolbar drag smoothly.
- *    - On release, calculates X and snaps to left or right screen edge.
+ *    - On release, snaps flush (0px gap) to left or right screen edge.
  *    - Persists edge state ('left' | 'right').
  *
- * 2. Dynamic Layout Reversal:
- *    - If on LEFT: Action buttons on left, collapse button on far right pointing left (<).
- *    - If on RIGHT: Collapse button on far left pointing right (>), action buttons on right.
+ * 2. Drag-to-Disable Drop Zone:
+ *    - Bottom-center cross (✕) drop zone appears while dragging the collapsed ring.
+ *    - Intersection detection scales drop zone to 1.2x and illuminates destructive red.
+ *    - Dropping into zone completely unmounts and disables the copilot overlay.
  *
- * 3. Zero Layout Shift for Mic Language Popup + Downward Caret:
- *    - WindowManager height and Y coordinate compensated so toolbar NEVER shifts.
- *    - Rotated caret points directly at center of Mic button.
+ * 3. Dynamic Layout Reversal & Flush Bezel Fit:
+ *    - If on LEFT: Action buttons on left -> divider -> collapse button (<) on far right. Flush left: 0.
+ *    - If on RIGHT: Collapse button (>) on far left -> divider -> action buttons on right. Flush right: 0.
  *
- * 4. Dark Glassmorphism Styling:
- *    - Deep translucent charcoal (rgba(30, 30, 32, 0.85)) with thin border (rgba(255, 255, 255, 0.1)).
- *    - Soft crisp white (#FAFAFA) icons.
- *    - Soft Neon Cyan (#00E5FF) active & glide highlights.
+ * 4. Zero Layout Shift for Mic Language Popup + Downward Caret.
+ * 5. Silent Internal Message Buffer Tracking (no visible badges).
  */
 class OverlayService : Service() {
 
@@ -76,6 +76,11 @@ class OverlayService : Service() {
     private val POSITION_DEBOUNCE_MS = 60L
     private var pendingPositionUpdate: Runnable? = null
 
+    // ── Drop Zone State (Drag to Disable) ──
+    private var dropZoneView: View? = null
+    private var dropZoneParams: WindowManager.LayoutParams? = null
+    private var isHoveringDropZone = false
+
     // ── Language State ──
     private var activeLanguageCode = "en-IN"
     private var activeLanguageBadge = "EN"
@@ -84,11 +89,10 @@ class OverlayService : Service() {
     private lateinit var voiceRecorder: VoiceRecorder
     private var isTranscribing = false
 
-    // ── Badge Counter ──
+    // ── Badge Counter (Silent background tracking, no UI badges) ──
     var contextMessageCount: Int = 0
         set(value) {
             field = value
-            mainHandler.post { updateBadge(value) }
         }
 
     companion object {
@@ -234,6 +238,7 @@ class OverlayService : Service() {
         mainHandler.post {
             pendingPositionUpdate?.let { mainHandler.removeCallbacks(it) }
             pendingPositionUpdate = null
+            hideDropZone()
             val view = overlayRootView ?: return@post
             try {
                 windowManager?.removeView(view)
@@ -254,7 +259,113 @@ class OverlayService : Service() {
     fun hideEdgePill() = hideOverlay()
     fun isToolbarShowing(): Boolean = isOverlayShowing
 
-    // ── Dynamic Edge Layout Reversal ──────────────────────────────────
+    // ── Drop Zone (Drag to Disable) ───────────────────────────────────
+
+    private fun showDropZone() {
+        if (dropZoneView != null) return
+        val wm = windowManager ?: return
+
+        try {
+            val dz = LayoutInflater.from(this).inflate(R.layout.overlay_drop_zone, null)
+            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                @Suppress("DEPRECATION")
+                WindowManager.LayoutParams.TYPE_PHONE
+            }
+
+            val density = resources.displayMetrics.density
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                type,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                x = 0
+                y = (40 * density).toInt()
+            }
+
+            wm.addView(dz, params)
+            dropZoneView = dz
+            dropZoneParams = params
+            isHoveringDropZone = false
+
+            dz.alpha = 0f
+            dz.scaleX = 0.7f
+            dz.scaleY = 0.7f
+            dz.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(160).start()
+            Log.d(TAG, "Drop zone mounted at bottom center.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to show drop zone: ${e.message}")
+        }
+    }
+
+    private fun updateDropZoneHoverState(isHovering: Boolean) {
+        if (isHovering == isHoveringDropZone) return
+        isHoveringDropZone = isHovering
+        val dz = dropZoneView ?: return
+
+        val circle = dz.findViewById<FrameLayout>(R.id.drop_zone_circle)
+        val icon = dz.findViewById<TextView>(R.id.drop_zone_icon)
+        val label = dz.findViewById<TextView>(R.id.drop_zone_label)
+
+        if (isHovering) {
+            circle?.setBackgroundResource(R.drawable.drop_zone_bg_active)
+            icon?.animate()?.scaleX(1.2f)?.scaleY(1.2f)?.setDuration(120)?.start()
+            label?.setTextColor(Color.parseColor("#EF4444"))
+            try {
+                overlayRootView?.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            } catch (e: Exception) {}
+        } else {
+            circle?.setBackgroundResource(R.drawable.drop_zone_bg_idle)
+            icon?.animate()?.scaleX(1.0f)?.scaleY(1.0f)?.setDuration(120)?.start()
+            label?.setTextColor(Color.parseColor("#94A3B8"))
+        }
+    }
+
+    private fun hideDropZone() {
+        val dz = dropZoneView ?: return
+        val wm = windowManager ?: return
+        dropZoneView = null
+        dropZoneParams = null
+        isHoveringDropZone = false
+
+        try {
+            dz.animate()
+                .alpha(0f)
+                .scaleX(0.7f)
+                .scaleY(0.7f)
+                .setDuration(120)
+                .withEndAction {
+                    try { wm.removeView(dz) } catch (e: Exception) {}
+                }
+                .start()
+        } catch (e: Exception) {
+            try { wm.removeView(dz) } catch (err: Exception) {}
+        }
+    }
+
+    fun disableCopilot() {
+        Log.i(TAG, "Copilot disabled via Drag-to-Disable drop zone.")
+        isCopilotActive = false
+        hideDropZone()
+        hideOverlay()
+
+        getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("copilot_enabled", false)
+            .apply()
+
+        IndicContextModule.instance?.emitCopilotDisabled()
+        Toast.makeText(applicationContext, "Assistant Copilot disabled", Toast.LENGTH_SHORT).show()
+        stopSelf()
+    }
+
+    // ── Dynamic Edge Layout Reversal & Flush Bezel Fit ─────────────────
 
     private fun applyEdgeLayout(edge: Edge) {
         val root = overlayRootView ?: return
@@ -263,6 +374,7 @@ class OverlayService : Service() {
         val collapseArrow = root.findViewById<TextView>(R.id.collapse_arrow) ?: return
         val divider = root.findViewById<View>(R.id.toolbar_divider) ?: return
         val actionButtons = root.findViewById<LinearLayout>(R.id.action_buttons_container) ?: return
+        val density = resources.displayMetrics.density
 
         toolbar.removeView(collapseBtn)
         toolbar.removeView(divider)
@@ -273,15 +385,51 @@ class OverlayService : Service() {
             toolbar.addView(actionButtons)
             toolbar.addView(divider)
             toolbar.addView(collapseBtn)
+
             collapseArrow.text = "‹"
             collapseBtn.setBackgroundResource(R.drawable.btn_collapse_bg_right)
+            collapseBtn.setPadding(0, 0, 0, 0)
+            (collapseBtn.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
+                lp.marginStart = (2 * density).toInt()
+                lp.marginEnd = 0
+                collapseBtn.layoutParams = lp
+            }
+
+            // Fully visible 24dp rounded left corners (no negative margins or offscreen shifts)
+            toolbar.setBackgroundResource(R.drawable.overlay_bg)
+            toolbar.setPadding((6 * density).toInt(), 0, (4 * density).toInt(), 0)
+
+            (toolbar.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                lp.gravity = Gravity.BOTTOM or Gravity.START
+                toolbar.layoutParams = lp
+            }
+
+            actionButtons.setPadding(0, 0, 0, 0)
         } else {
-            // RIGHT edge: Collapse button on far left (>) -> divider -> action buttons on right
+            // RIGHT edge: Collapse button on far left (>) -> divider -> action buttons on right (flush right)
             toolbar.addView(collapseBtn)
             toolbar.addView(divider)
             toolbar.addView(actionButtons)
+
             collapseArrow.text = "›"
             collapseBtn.setBackgroundResource(R.drawable.btn_collapse_bg_left)
+            collapseBtn.setPadding(0, 0, 0, 0)
+            (collapseBtn.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
+                lp.marginStart = 0
+                lp.marginEnd = (2 * density).toInt()
+                collapseBtn.layoutParams = lp
+            }
+
+            // Fully visible 24dp rounded corners, anchored directly to right bounds
+            toolbar.setBackgroundResource(R.drawable.overlay_bg)
+            toolbar.setPadding((4 * density).toInt(), 0, (6 * density).toInt(), 0)
+
+            (toolbar.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                lp.gravity = Gravity.BOTTOM or Gravity.END
+                toolbar.layoutParams = lp
+            }
+
+            actionButtons.setPadding(0, 0, 0, 0)
         }
     }
 
@@ -292,18 +440,18 @@ class OverlayService : Service() {
         val view = overlayRootView ?: return
         val params = overlayParams ?: return
         val screenW = resources.displayMetrics.widthPixels
-        val density = resources.displayMetrics.density
-        val margin = (8 * density).toInt()
 
         isExpanded = true
-        val toolbarW = (screenW * 0.72f).toInt()
-        params.width = toolbarW
+        params.width = WindowManager.LayoutParams.WRAP_CONTENT
 
-        // Edge coordinate calculation
         if (currentEdge == Edge.RIGHT) {
-            params.x = screenW - toolbarW - margin
+            // Right-edge flush: gravity = TOP | END, x = 0 (right: 0 with 0px gap)
+            params.gravity = Gravity.TOP or Gravity.END
+            params.x = 0
         } else {
-            params.x = margin
+            // Left-edge flush: gravity = TOP | START, x = 0 (left: 0 with fully visible rounded edge)
+            params.gravity = Gravity.TOP or Gravity.START
+            params.x = 0
         }
 
         val disk = view.findViewById<View>(R.id.disk_container)
@@ -315,29 +463,27 @@ class OverlayService : Service() {
         toolbar?.visibility = View.VISIBLE
         toolbar?.alpha = 0f
         toolbar?.scaleX = 0.4f
-        toolbar?.pivotX = if (currentEdge == Edge.LEFT) 0f else toolbarW.toFloat()
+        toolbar?.pivotX = if (currentEdge == Edge.LEFT) 0f else (view.width.toFloat().takeIf { it > 0 } ?: (screenW * 0.7f))
         toolbar?.animate()?.alpha(1f)?.scaleX(1f)?.setDuration(220)?.start()
 
         try { wm.updateViewLayout(view, params) } catch (e: Exception) {}
-        Log.d(TAG, "Expanded into 72% toolbar at $currentEdge edge.")
+        Log.d(TAG, "Expanded into toolbar at $currentEdge edge (flush x=0).")
     }
 
     private fun collapseToDisk() {
         val wm = windowManager ?: return
         val view = overlayRootView ?: return
         val params = overlayParams ?: return
-        val screenW = resources.displayMetrics.widthPixels
-        val density = resources.displayMetrics.density
-        val margin = (8 * density).toInt()
-        val diskW = (42 * density).toInt()
 
         isExpanded = false
         params.width = WindowManager.LayoutParams.WRAP_CONTENT
 
         if (currentEdge == Edge.RIGHT) {
-            params.x = screenW - diskW - margin
+            params.gravity = Gravity.TOP or Gravity.END
+            params.x = 0
         } else {
-            params.x = margin
+            params.gravity = Gravity.TOP or Gravity.START
+            params.x = 0
         }
 
         val disk = view.findViewById<View>(R.id.disk_container)
@@ -353,7 +499,7 @@ class OverlayService : Service() {
         disk?.animate()?.alpha(1f)?.scaleX(1f)?.scaleY(1f)?.setDuration(200)?.start()
 
         try { wm.updateViewLayout(view, params) } catch (e: Exception) {}
-        Log.d(TAG, "Collapsed back into circular disk at $currentEdge edge.")
+        Log.d(TAG, "Collapsed back into circular disk at $currentEdge edge (flush x=0).")
     }
 
     // ── Edge Snapping Animation ──
@@ -364,9 +510,8 @@ class OverlayService : Service() {
         val params = overlayParams ?: return
         val screenW = resources.displayMetrics.widthPixels
         val density = resources.displayMetrics.density
-        val margin = (8 * density).toInt()
 
-        val newEdge = if (releaseRawX < screenW / 2) Edge.LEFT else Edge.RIGHT
+        val newEdge = if (releaseRawX < screenW / 2f) Edge.LEFT else Edge.RIGHT
         currentEdge = newEdge
 
         // Persist edge choice
@@ -377,9 +522,12 @@ class OverlayService : Service() {
 
         applyEdgeLayout(newEdge)
 
-        val targetWidth = if (isExpanded) (screenW * 0.72f).toInt() else (42 * density).toInt()
+        val targetWidth = view.width.takeIf { it > 0 } ?: if (isExpanded) (230 * density).toInt() else (42 * density).toInt()
         val startX = params.x
-        val endX = if (newEdge == Edge.LEFT) margin else (screenW - targetWidth - margin)
+        val endX = if (newEdge == Edge.LEFT) 0 else (screenW - targetWidth).coerceAtLeast(0)
+
+        // Ensure gravity is Gravity.TOP or Gravity.START during the smooth glide animator
+        params.gravity = Gravity.TOP or Gravity.START
 
         val animator = ValueAnimator.ofInt(startX, endX).apply {
             duration = 180L
@@ -389,6 +537,19 @@ class OverlayService : Service() {
                 try { wm.updateViewLayout(view, params) } catch (e: Exception) {}
             }
         }
+        animator.addListener(object : android.animation.AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: android.animation.Animator) {
+                // Lock flush to the physical bezel
+                if (newEdge == Edge.RIGHT) {
+                    params.gravity = Gravity.TOP or Gravity.END
+                    params.x = 0
+                } else {
+                    params.gravity = Gravity.TOP or Gravity.START
+                    params.x = 0
+                }
+                try { wm.updateViewLayout(view, params) } catch (e: Exception) {}
+            }
+        })
         animator.start()
     }
 
@@ -412,43 +573,89 @@ class OverlayService : Service() {
 
         langBadge?.text = activeLanguageBadge
 
-        // ── 1. Full Draggability for the Disk ──
+        // ── 1. Full Draggability for the Disk (with Drop Zone & Drag-to-Disable) ──
         var diskDownX = 0f
         var diskDownY = 0f
-        var diskInitialParamX = 0
-        var diskInitialParamY = 0
+        var diskInitialScreenX = 0
+        var diskInitialScreenY = 0
         var isDiskDrag = false
 
         diskContainer?.setOnTouchListener { _, ev ->
             when (ev.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    val p = overlayParams ?: return@setOnTouchListener false
+                    overlayParams ?: return@setOnTouchListener false
                     diskDownX = ev.rawX
                     diskDownY = ev.rawY
-                    diskInitialParamX = p.x
-                    diskInitialParamY = p.y
+
+                    val loc = IntArray(2)
+                    view.getLocationOnScreen(loc)
+                    diskInitialScreenX = loc[0]
+                    diskInitialScreenY = loc[1]
+
                     isDiskDrag = false
+                    isHoveringDropZone = false
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = ev.rawX - diskDownX
                     val dy = ev.rawY - diskDownY
-                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > 10.0) {
-                        isDiskDrag = true
+
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > 8.0) {
+                        if (!isDiskDrag) {
+                            isDiskDrag = true
+                            showDropZone()
+                        }
+
                         val p = overlayParams ?: return@setOnTouchListener false
-                        p.x = (diskInitialParamX + dx.toInt())
+                        val screenW = resources.displayMetrics.widthPixels
                         val screenH = resources.displayMetrics.heightPixels
-                        p.y = (diskInitialParamY + dy.toInt()).coerceIn(0, screenH - 100)
+                        val density = resources.displayMetrics.density
+
+                        p.gravity = Gravity.TOP or Gravity.START
+                        val diskW = view.width.takeIf { it > 0 } ?: (42 * density).toInt()
+                        val diskH = view.height.takeIf { it > 0 } ?: (42 * density).toInt()
+
+                        p.x = (diskInitialScreenX + dx.toInt()).coerceIn(0, screenW - diskW)
+                        p.y = (diskInitialScreenY + dy.toInt()).coerceIn(0, screenH - diskH)
                         lastTargetY = p.y
                         try { wm.updateViewLayout(view, p) } catch (e: Exception) {}
+
+                        // ── Intersection Math with Bottom Center Drop Zone ──
+                        val ringCenterX = p.x + (diskW / 2f)
+                        val ringCenterY = p.y + (diskH / 2f)
+
+                        val dropZoneCenterX = screenW / 2f
+                        val dropZoneCenterY = screenH - (40 * density) - (21 * density) - (30 * density)
+                        val dropThresholdRadius = 75 * density
+
+                        val distance = Math.hypot(
+                            (ringCenterX - dropZoneCenterX).toDouble(),
+                            (ringCenterY - dropZoneCenterY).toDouble()
+                        )
+
+                        updateDropZoneHoverState(distance <= dropThresholdRadius)
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     if (isDiskDrag) {
-                        snapToNearestEdge(ev.rawX)
+                        val shouldDisable = isHoveringDropZone
+                        hideDropZone()
+                        if (shouldDisable) {
+                            disableCopilot()
+                        } else {
+                            snapToNearestEdge(ev.rawX)
+                        }
                     } else {
+                        hideDropZone()
                         expandToToolbar()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    hideDropZone()
+                    if (isDiskDrag) {
+                        snapToNearestEdge(ev.rawX)
                     }
                     true
                 }
@@ -459,30 +666,40 @@ class OverlayService : Service() {
         // ── 2. Full Draggability for the Toolbar Background ──
         var tbDownX = 0f
         var tbDownY = 0f
-        var tbInitialParamX = 0
-        var tbInitialParamY = 0
+        var tbInitialScreenX = 0
+        var tbInitialScreenY = 0
         var isTbDrag = false
 
         toolbarContainer?.setOnTouchListener { _, ev ->
             when (ev.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    val p = overlayParams ?: return@setOnTouchListener false
+                    overlayParams ?: return@setOnTouchListener false
                     tbDownX = ev.rawX
                     tbDownY = ev.rawY
-                    tbInitialParamX = p.x
-                    tbInitialParamY = p.y
+
+                    val loc = IntArray(2)
+                    view.getLocationOnScreen(loc)
+                    tbInitialScreenX = loc[0]
+                    tbInitialScreenY = loc[1]
+
                     isTbDrag = false
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = ev.rawX - tbDownX
                     val dy = ev.rawY - tbDownY
-                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > 12.0) {
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > 10.0) {
                         isTbDrag = true
                         val p = overlayParams ?: return@setOnTouchListener false
-                        p.x = (tbInitialParamX + dx.toInt())
+                        val screenW = resources.displayMetrics.widthPixels
                         val screenH = resources.displayMetrics.heightPixels
-                        p.y = (tbInitialParamY + dy.toInt()).coerceIn(0, screenH - 100)
+
+                        p.gravity = Gravity.TOP or Gravity.START
+                        val tbW = view.width.takeIf { it > 0 } ?: (screenW * 0.72f).toInt()
+                        val tbH = view.height.takeIf { it > 0 } ?: 100
+
+                        p.x = (tbInitialScreenX + dx.toInt()).coerceIn(0, screenW - tbW)
+                        p.y = (tbInitialScreenY + dy.toInt()).coerceIn(0, screenH - tbH)
                         lastTargetY = p.y
                         try { wm.updateViewLayout(view, p) } catch (e: Exception) {}
                     }
@@ -555,10 +772,13 @@ class OverlayService : Service() {
                         isLongPressActive = true
                         v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
 
+                        val density = resources.displayMetrics.density
+                        popupWrapper?.bringToFront()
+                        popupWrapper?.elevation = 32 * density
+
                         // Position Caret & Menu directly over Mic icon
                         val micLoc = IntArray(2)
                         btnMic.getLocationOnScreen(micLoc)
-                        val density = resources.displayMetrics.density
                         val menuWidth = (200 * density).toInt()
 
                         // Calculate horizontal alignment so caret is centered above Mic
@@ -569,7 +789,17 @@ class OverlayService : Service() {
                             screenW - menuWidth - (8 * density).toInt()
                         )
 
-                        popupWrapper?.x = menuX.toFloat() - (overlayParams?.x ?: 0)
+                        val rootLoc = IntArray(2)
+                        rootView.getLocationOnScreen(rootLoc)
+                        popupWrapper?.x = (menuX - rootLoc[0]).toFloat()
+
+                        val caret = rootView.findViewById<View>(R.id.menu_caret)
+                        val caretW = (14 * density).toInt()
+                        val caretXInPopup = (micCenterX - menuX - (caretW / 2f)).coerceIn(
+                            (12 * density),
+                            (menuWidth - (12 * density) - caretW).toFloat()
+                        )
+                        caret?.translationX = caretXInPopup
 
                         // Compensate WindowManager Y so toolbar DOES NOT SHIFT DOWN
                         val wm = windowManager
@@ -580,9 +810,9 @@ class OverlayService : Service() {
                                 View.MeasureSpec.makeMeasureSpec(menuWidth, View.MeasureSpec.EXACTLY),
                                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
                             )
-                            val popupH = popupWrapper?.measuredHeight ?: (280 * density).toInt()
+                            val popupH = (popupWrapper?.measuredHeight ?: (220 * density).toInt()) + (8 * density).toInt()
 
-                            // Shift window up by popup height so toolbar stays rigidly fixed!
+                            // Shift window up by popup height + gap so toolbar stays rigidly fixed!
                             p.y = (p.y - popupH).coerceAtLeast(0)
                             try { wm.updateViewLayout(rootView, p) } catch (e: Exception) {}
                         }
@@ -590,7 +820,7 @@ class OverlayService : Service() {
                         popupWrapper?.visibility = View.VISIBLE
                         popupWrapper?.alpha = 0f
                         popupWrapper?.scaleY = 0.8f
-                        popupWrapper?.pivotY = popupWrapper.height.toFloat()
+                        popupWrapper?.pivotY = (popupWrapper?.measuredHeight?.toFloat() ?: (220 * density))
                         popupWrapper?.animate()?.alpha(1f)?.scaleY(1f)?.setDuration(160)?.start()
                     }
                     longPressRunnable = r
@@ -794,17 +1024,7 @@ class OverlayService : Service() {
     }
 
     private fun updateBadge(count: Int) {
-        val root = overlayRootView ?: return
-        val diskBadge = root.findViewById<TextView>(R.id.disk_context_badge)
-        val toolbarBadge = root.findViewById<TextView>(R.id.context_badge)
-
-        val text = if (count > 99) "99+" else count.toString()
-        val visibility = if (count > 0) View.VISIBLE else View.GONE
-
-        diskBadge?.visibility = visibility
-        diskBadge?.text = text
-        toolbarBadge?.visibility = visibility
-        toolbarBadge?.text = text
+        // Message buffer tracking remains internal; no visible badge displayed on UI.
     }
 
     private fun copyToClipboard(text: String) {
@@ -823,23 +1043,21 @@ class OverlayService : Service() {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
-        val screenW = resources.displayMetrics.widthPixels
-        val density = resources.displayMetrics.density
-        val margin = (8 * density).toInt()
-
-        val width = if (expanded) (screenW * 0.72f).toInt() else WindowManager.LayoutParams.WRAP_CONTENT
-        val xPos = if (currentEdge == Edge.LEFT) margin else (screenW - (if (expanded) width else (42 * density).toInt()) - margin)
-
         return WindowManager.LayoutParams(
-            width,
+            WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = xPos
+            if (currentEdge == Edge.RIGHT) {
+                gravity = Gravity.TOP or Gravity.END
+                x = 0
+            } else {
+                gravity = Gravity.TOP or Gravity.START
+                x = 0
+            }
             y = yPos
         }
     }
