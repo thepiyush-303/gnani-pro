@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- btn_collapse_flush_right.xml - Collapse handle on far right of toolbar, 0px right radius for 100% flush bezel fit -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#242933" />
+    <corners
+        android:topRightRadius="0dp"
+        android:bottomRightRadius="0dp"
+        android:topLeftRadius="8dp"
+        android:bottomLeftRadius="8dp" />
+    <stroke android:width="1dp" android:color="#26FFFFFF" />
+</shape>
+

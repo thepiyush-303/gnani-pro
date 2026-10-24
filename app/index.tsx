@@ -142,6 +142,9 @@ export default function DashboardScreen() {
         setSttStatus('🎙️ Listening... Speak into microphone');
       }
     });
+    const disabledSub = IndicContext.addCopilotDisabledListener(() => {
+      setCopilotEnabled(false);
+    });
 
     return () => {
       bufferSub.remove();
@@ -149,6 +152,7 @@ export default function DashboardScreen() {
       blurSub.remove();
       transcriptSub.remove();
       recordingSub.remove();
+      disabledSub.remove();
     };
   }, []);
 
@@ -337,13 +341,6 @@ export default function DashboardScreen() {
             thumbColor={copilotEnabled ? '#FFFFFF' : '#94A3B8'}
           />
         </View>
-        {copilotEnabled && bufferCount > 0 && (
-          <View style={styles.bufferBadgeRow}>
-            <View style={styles.bufferBadge}>
-              <Text style={styles.bufferBadgeText}>📋 {bufferCount} context messages captured</Text>
-            </View>
-          </View>
-        )}
       </View>
 
       {/* ── Overlay Behaviour Mode ── */}
