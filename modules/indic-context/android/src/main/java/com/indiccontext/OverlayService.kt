@@ -75,6 +75,8 @@ class OverlayService : Service() {
     private val POSITION_THRESHOLD_PX = 10
     private val POSITION_DEBOUNCE_MS = 60L
     private var pendingPositionUpdate: Runnable? = null
+    private var pendingHideRunnable: Runnable? = null
+    private val HIDE_DEBOUNCE_MS = 180L
 
     // ── Language State ──
     private var activeLanguageCode = "en-IN"
@@ -180,6 +182,10 @@ class OverlayService : Service() {
         if (!isCopilotActive) return
 
         mainHandler.post {
+            // Cancel any pending hide action so transient focus fluctuations don't flicker/destroy window
+            pendingHideRunnable?.let { mainHandler.removeCallbacks(it) }
+            pendingHideRunnable = null
+
             val wm = windowManager ?: return@post
             val density = resources.displayMetrics.density
             val screenH = resources.displayMetrics.heightPixels
@@ -230,23 +236,38 @@ class OverlayService : Service() {
 
     // ── Hide Overlay ──────────────────────────────────────────────────
 
-    fun hideOverlay() {
+    fun hideOverlay(immediate: Boolean = false) {
         mainHandler.post {
             pendingPositionUpdate?.let { mainHandler.removeCallbacks(it) }
             pendingPositionUpdate = null
-            val view = overlayRootView ?: return@post
-            try {
-                windowManager?.removeView(view)
-            } catch (e: Exception) {
-                Log.w(TAG, "removeView(overlay): ${e.message}")
-            } finally {
-                overlayRootView = null
-                overlayParams = null
-                isOverlayShowing = false
-                isExpanded = false
-                lastTargetY = -1
-                Log.i(TAG, "Overlay completely hidden.")
+
+            if (!immediate) {
+                if (pendingHideRunnable != null) return@post
+                val r = Runnable { performHideOverlay() }
+                pendingHideRunnable = r
+                mainHandler.postDelayed(r, HIDE_DEBOUNCE_MS)
+            } else {
+                pendingHideRunnable?.let { mainHandler.removeCallbacks(it) }
+                pendingHideRunnable = null
+                performHideOverlay()
             }
+        }
+    }
+
+    private fun performHideOverlay() {
+        pendingHideRunnable = null
+        val view = overlayRootView ?: return
+        try {
+            windowManager?.removeView(view)
+        } catch (e: Exception) {
+            Log.w(TAG, "removeView(overlay): ${e.message}")
+        } finally {
+            overlayRootView = null
+            overlayParams = null
+            isOverlayShowing = false
+            isExpanded = false
+            lastTargetY = -1
+            Log.i(TAG, "Overlay completely hidden.")
         }
     }
 
@@ -392,6 +413,69 @@ class OverlayService : Service() {
         animator.start()
     }
 
+    private fun bindQuickActionButton(view: View?, onClickAction: () -> Unit) {
+        if (view == null) return
+        var touchDownX = 0f
+        var touchDownY = 0f
+        var initialParamX = 0
+        var initialParamY = 0
+        var isDrag = false
+
+        view.setOnTouchListener { v, ev ->
+            val p = overlayParams
+            when (ev.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    touchDownX = ev.rawX
+                    touchDownY = ev.rawY
+                    if (p != null) {
+                        initialParamX = p.x
+                        initialParamY = p.y
+                    }
+                    isDrag = false
+                    v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    v.animate().scaleX(0.88f).scaleY(0.88f).setDuration(40).start()
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = ev.rawX - touchDownX
+                    val dy = ev.rawY - touchDownY
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > 15.0) {
+                        if (!isDrag) {
+                            isDrag = true
+                            v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(40).start()
+                        }
+                        if (p != null) {
+                            val wm = windowManager
+                            val root = overlayRootView
+                            p.x = initialParamX + dx.toInt()
+                            val screenH = resources.displayMetrics.heightPixels
+                            p.y = (initialParamY + dy.toInt()).coerceIn(0, screenH - 100)
+                            lastTargetY = p.y
+                            if (wm != null && root != null) {
+                                try { wm.updateViewLayout(root, p) } catch (e: Exception) {}
+                            }
+                        }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(40).start()
+                    if (isDrag) {
+                        snapToNearestEdge(ev.rawX)
+                    } else {
+                        onClickAction()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(40).start()
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
     // ── View Inflation & Gesture Wiring ────────────────────────────────
 
     private fun inflateOverlayView(wm: WindowManager): View {
@@ -412,106 +496,25 @@ class OverlayService : Service() {
 
         langBadge?.text = activeLanguageBadge
 
-        // ── 1. Full Draggability for the Disk ──
-        var diskDownX = 0f
-        var diskDownY = 0f
-        var diskInitialParamX = 0
-        var diskInitialParamY = 0
-        var isDiskDrag = false
-
-        diskContainer?.setOnTouchListener { _, ev ->
-            when (ev.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    val p = overlayParams ?: return@setOnTouchListener false
-                    diskDownX = ev.rawX
-                    diskDownY = ev.rawY
-                    diskInitialParamX = p.x
-                    diskInitialParamY = p.y
-                    isDiskDrag = false
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = ev.rawX - diskDownX
-                    val dy = ev.rawY - diskDownY
-                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > 10.0) {
-                        isDiskDrag = true
-                        val p = overlayParams ?: return@setOnTouchListener false
-                        p.x = (diskInitialParamX + dx.toInt())
-                        val screenH = resources.displayMetrics.heightPixels
-                        p.y = (diskInitialParamY + dy.toInt()).coerceIn(0, screenH - 100)
-                        lastTargetY = p.y
-                        try { wm.updateViewLayout(view, p) } catch (e: Exception) {}
-                    }
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
-                    if (isDiskDrag) {
-                        snapToNearestEdge(ev.rawX)
-                    } else {
-                        expandToToolbar()
-                    }
-                    true
-                }
-                else -> false
-            }
+        // ── 1. Circular Disk (Instant Tap + Drag) ──
+        bindQuickActionButton(diskContainer) {
+            expandToToolbar()
         }
 
-        // ── 2. Full Draggability for the Toolbar Background ──
-        var tbDownX = 0f
-        var tbDownY = 0f
-        var tbInitialParamX = 0
-        var tbInitialParamY = 0
-        var isTbDrag = false
-
-        toolbarContainer?.setOnTouchListener { _, ev ->
-            when (ev.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    val p = overlayParams ?: return@setOnTouchListener false
-                    tbDownX = ev.rawX
-                    tbDownY = ev.rawY
-                    tbInitialParamX = p.x
-                    tbInitialParamY = p.y
-                    isTbDrag = false
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = ev.rawX - tbDownX
-                    val dy = ev.rawY - tbDownY
-                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > 12.0) {
-                        isTbDrag = true
-                        val p = overlayParams ?: return@setOnTouchListener false
-                        p.x = (tbInitialParamX + dx.toInt())
-                        val screenH = resources.displayMetrics.heightPixels
-                        p.y = (tbInitialParamY + dy.toInt()).coerceIn(0, screenH - 100)
-                        lastTargetY = p.y
-                        try { wm.updateViewLayout(view, p) } catch (e: Exception) {}
-                    }
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
-                    if (isTbDrag) {
-                        snapToNearestEdge(ev.rawX)
-                    }
-                    true
-                }
-                else -> false
-            }
+        // ── 2. Action Buttons (Instant Tap Response) ──
+        bindQuickActionButton(view.findViewById<View>(R.id.btn_improve)) {
+            Toast.makeText(applicationContext, "✨ Improve Text (Gnani Evon) — coming soon", Toast.LENGTH_SHORT).show()
+        }
+        bindQuickActionButton(view.findViewById<View>(R.id.btn_factcheck)) {
+            Toast.makeText(applicationContext, "🔍 Fact Check — coming soon", Toast.LENGTH_SHORT).show()
+        }
+        bindQuickActionButton(view.findViewById<View>(R.id.btn_icebreaker)) {
+            Toast.makeText(applicationContext, "🧊 Icebreaker — coming soon", Toast.LENGTH_SHORT).show()
         }
 
         // ── 3. Collapse Handle ──
-        collapseHandle?.setOnClickListener {
+        bindQuickActionButton(collapseHandle) {
             collapseToDisk()
-        }
-
-        // ── Action Buttons ──
-        view.findViewById<View>(R.id.btn_improve)?.setOnClickListener {
-            Toast.makeText(applicationContext, "✨ Improve Text (Gnani Evon) — coming soon", Toast.LENGTH_SHORT).show()
-        }
-        view.findViewById<View>(R.id.btn_factcheck)?.setOnClickListener {
-            Toast.makeText(applicationContext, "🔍 Fact Check — coming soon", Toast.LENGTH_SHORT).show()
-        }
-        view.findViewById<View>(R.id.btn_icebreaker)?.setOnClickListener {
-            Toast.makeText(applicationContext, "🧊 Icebreaker — coming soon", Toast.LENGTH_SHORT).show()
         }
 
         // ── 4. Touch & Glide Language Selector with Caret ──
