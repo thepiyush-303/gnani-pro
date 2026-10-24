@@ -1,5 +1,6 @@
 /**
  * IndicContext Assistant — Shared Type Definitions
+ * Complete Context Management System (Tiers 1, 2, 3)
  */
 
 export interface ChatBubble {
@@ -19,6 +20,8 @@ export interface SessionBufferState {
   bubbles: ChatBubble[];
   maxCapacity: number;
   activeAppPackage: string | null;
+  currentThreadId: string | null;
+  currentThreadTitle: string | null;
 }
 
 export type ToneOption = 'casual' | 'polite' | 'respectful' | 'informative';
@@ -33,44 +36,96 @@ export type PersonaType =
   | 'Colleague'
   | 'Auto';
 
-export interface PersonaConfig {
-  contactId: string;
-  contactName?: string;
+export type HinglishIntensity = 'pure_english' | 'light_hinglish' | 'deep_indic';
+
+/**
+ * Tier 2: Per-Listener Context Profile
+ * Stored locally and keyed by hashed threadId.
+ */
+export interface ListenerContext {
+  threadId: string;
+  threadTitle: string;
   persona: PersonaType;
+  formalityLevel: 1 | 2 | 3 | 4 | 5;
+  preferredLanguage?: string;
+  honorificRequired: boolean;
+  openAgreements: string[];
   customNotes?: string;
+  lastSeenMs: number;
 }
 
-export interface FactCheckClaim {
-  claim: string;
-  isAccurate: boolean;
+/**
+ * Tier 3: Global User Persona & Communication Store
+ */
+export interface GlobalUserPersona {
+  userName: string;
+  defaultTone: ToneOption;
+  hinglishIntensity: HinglishIntensity;
+  useHonorificsByDefault: boolean;
+  autoToneCheckEnabled: boolean;
+  autoFactCheckEnabled: boolean;
+  customVocabulary: string[];
+}
+
+/**
+ * Listener-Aware Tone & Disrespect Detection
+ */
+export interface ToneSensitivityResult {
+  isDisrespectful: boolean;
+  severity: 'none' | 'low' | 'medium' | 'high';
+  toneDetected: string;
+  reasons: string[];
+  suggestedDraft: string;
+  originalDraft: string;
+}
+
+/**
+ * Fact & Inconsistency Verification Result
+ */
+export interface FactConflictItem {
+  statement: string;
+  earlierStatement: string;
   explanation: string;
-  suggestedCorrection?: string;
 }
 
 export interface FactCheckResult {
+  hasConflict: boolean;
   flagged: boolean;
-  claims: FactCheckClaim[];
+  inconsistencies: FactConflictItem[];
+  claims: Array<{
+    claim: string;
+    isAccurate: boolean;
+    explanation: string;
+    suggestedCorrection?: string;
+  }>;
   summary?: string;
+  suggestedCorrection?: string;
 }
 
-export interface CulturalSensitivityConcern {
-  category: 'formality' | 'humor' | 'directness' | 'honorifics' | 'other';
-  explanation: string;
-  suggestion?: string;
+/**
+ * Thread Catch-Up Summary
+ */
+export interface ThreadSummaryResult {
+  brief: string;
+  keyPoints: string[];
+  directAsks: string[];
+  actionItems: string[];
+  messageCount: number;
 }
 
-export interface CulturalSensitivityResult {
-  flagged: boolean;
-  personaDetectedOrConfigured: PersonaType | string;
-  concerns: CulturalSensitivityConcern[];
+/**
+ * Contextual Update Enhancement
+ */
+export interface EnhancedUpdateResult {
+  enhancedDraft: string;
+  toneUsed: ToneOption;
+  contextReferences: string[];
 }
 
-export interface PreSendResult {
-  passed: boolean;
-  factCheck?: FactCheckResult;
-  culturalSensitivity?: CulturalSensitivityResult;
-}
-
+/**
+ * Context-Driven Icebreakers
+ */
 export interface IcebreakerResult {
   suggestions: string[];
+  category?: 'reconnect' | 'conversation_starter' | 'followup';
 }

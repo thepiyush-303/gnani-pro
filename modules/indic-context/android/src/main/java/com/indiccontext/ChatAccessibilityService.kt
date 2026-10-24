@@ -14,6 +14,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import java.security.MessageDigest
 
 /**
  * ChatAccessibilityService — Phase 3
@@ -48,6 +49,12 @@ class ChatAccessibilityService : AccessibilityService() {
     private var inputFocused = false
     private val inputBoundsRect = Rect()
     private var focusedInputNode: AccessibilityNodeInfo? = null
+
+    // Thread Context (Tier 2 Listener identification)
+    var activeThreadTitle: String? = null
+        private set
+    var activeThreadId: String? = null
+        private set
 
     companion object {
         private const val TAG = "ChatA11y"
@@ -160,6 +167,14 @@ class ChatAccessibilityService : AccessibilityService() {
                     onLeftSupportedApp()
                 } else {
                     buffer.resetIfAppChanged(pkg)
+                    val root = rootInActiveWindow
+                    if (root != null) {
+                        try {
+                            updateActiveThread(root, pkg)
+                        } finally {
+                            root.recycle()
+                        }
+                    }
                     // If window changed within the supported app (e.g. backed out of chat to conversation list),
                     // re-verify input bar & keyboard state immediately
                     checkInputBarState(pkg)
@@ -207,6 +222,7 @@ class ChatAccessibilityService : AccessibilityService() {
 
                 val root = rootInActiveWindow ?: return
                 try {
+                    updateActiveThread(root, pkg)
                     val added = walkAndCapture(root, pkg)
                     if (added > 0) scheduleBufferEvent()
                 } finally {
@@ -339,6 +355,8 @@ class ChatAccessibilityService : AccessibilityService() {
     private fun onLeftSupportedApp() {
         inputFocused = false
         clearFocusedNode()
+        activeThreadTitle = null
+        activeThreadId = null
         OverlayService.instance?.hideOverlay()
     }
 
@@ -348,11 +366,97 @@ class ChatAccessibilityService : AccessibilityService() {
     }
 
     // ───────────────────────────────────────────────────────────────
+    // Thread Detection (Tier 2 Listener Identification)
+    // ───────────────────────────────────────────────────────────────
+
+    private fun updateActiveThread(root: AccessibilityNodeInfo, pkg: String) {
+        var title: String? = null
+        try {
+            if (pkg == "com.whatsapp" || pkg == "com.whatsapp.w4b") {
+                val nodes = root.findAccessibilityNodeInfosByViewId("$pkg:id/conversation_contact_name")
+                if (!nodes.isNullOrEmpty()) {
+                    val t = nodes[0].text?.toString()?.trim()
+                    if (!t.isNullOrEmpty()) {
+                        title = t
+                    }
+                    nodes.forEach { it.recycle() }
+                }
+            }
+
+            // Fallback: If not found by viewId, inspect top header (top 90dp)
+            if (title.isNullOrEmpty()) {
+                val density = resources.displayMetrics.density
+                val headerMaxY = (90 * density).toInt()
+                title = findTopHeaderTitle(root, headerMaxY)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "updateActiveThread error: ${e.message}")
+        }
+
+        if (!title.isNullOrEmpty() && title != activeThreadTitle) {
+            activeThreadTitle = title
+            val newId = generateThreadId(title, pkg)
+            activeThreadId = newId
+            val cleared = buffer.resetIfThreadChanged(pkg, newId)
+            if (cleared) {
+                OverlayService.instance?.contextMessageCount = 0
+                scheduleBufferEvent()
+            }
+            Log.i(TAG, "Active thread switched: '$title' [ID=$newId]")
+        }
+    }
+
+    private fun findTopHeaderTitle(root: AccessibilityNodeInfo, headerMaxY: Int): String? {
+        val b = Rect()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            val cls = node.className?.toString() ?: ""
+            if (cls.endsWith("TextView")) {
+                node.getBoundsInScreen(b)
+                // Header text is in the top bar (Y between 20dp and 90dp to avoid status bar time/battery)
+                if (b.top in 30..headerMaxY && b.height() > 10) {
+                    val text = node.text?.toString()?.trim()
+                    if (!text.isNullOrEmpty() && text.length in 2..40 && !text.matches(Regex(".*\\d{1,2}:\\d{2}.*"))) {
+                        val lc = text.lowercase()
+                        if (lc != "whatsapp" && lc != "search" && lc != "online" && lc != "typing...") {
+                            if (node !== root) node.recycle()
+                            return text
+                        }
+                    }
+                }
+            }
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { queue.add(it) }
+            }
+            if (node !== root) node.recycle()
+        }
+        return null
+    }
+
+    private fun generateThreadId(title: String, pkg: String): String {
+        val raw = "$pkg:${title.trim().lowercase()}"
+        return try {
+            val md = MessageDigest.getInstance("SHA-256")
+            val bytes = md.digest(raw.toByteArray(Charsets.UTF_8))
+            bytes.take(8).joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            raw.hashCode().toString()
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────
     // Buffer capture
     // ───────────────────────────────────────────────────────────────
 
     private fun walkAndCapture(root: AccessibilityNodeInfo, pkg: String): Int {
         var added = 0
+        val screenW = resources.displayMetrics.widthPixels
+        val density = resources.displayMetrics.density
+        val headerMaxY = (90 * density).toInt()
+        val bounds = Rect()
+
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
         while (queue.isNotEmpty()) {
@@ -361,14 +465,23 @@ class ChatAccessibilityService : AccessibilityService() {
             val cls = node.className?.toString() ?: ""
             if (text != null && text.isNotBlank() && cls.endsWith("TextView")) {
                 val cleanText = text.trim()
-                
+                node.getBoundsInScreen(bounds)
+
+                // Skip views inside the top header (contact name, status bar, app name)
+                val isInHeader = bounds.bottom <= headerMaxY
+
                 // Ignore timestamps (e.g., "10:45 AM", "12:30 pm") and tiny words
                 val isTimeStamp = cleanText.matches(Regex(".*\\d{1,2}:\\d{2}.*"))
-                
-                if (cleanText.length > 3 && !isTimeStamp) {
+
+                if (!isInHeader && cleanText.length > 3 && !isTimeStamp) {
+                    val isSelf = when {
+                        bounds.left > screenW * 0.28f -> true
+                        bounds.right < screenW * 0.82f -> false
+                        else -> null
+                    }
                     val bubble = ChatBubble(
                         text = cleanText,
-                        isSelf = null,
+                        isSelf = isSelf,
                         nodeClassName = cls,
                         appPackage = pkg,
                     )
@@ -389,9 +502,9 @@ class ChatAccessibilityService : AccessibilityService() {
         bufferDebounce?.let { mainHandler.removeCallbacks(it) }
         val r = Runnable {
             val snapshot = buffer.snapshot()
-            Log.d(TAG, "Emitting bufferUpdated [size=${snapshot.size}]")
+            Log.d(TAG, "Emitting bufferUpdated [size=${snapshot.size}, thread=$activeThreadTitle ($activeThreadId)]")
             OverlayService.instance?.contextMessageCount = snapshot.size
-            IndicContextModule.instance?.emitBufferUpdated(snapshot)
+            IndicContextModule.instance?.emitBufferUpdated(snapshot, activeThreadTitle, activeThreadId)
         }
         bufferDebounce = r
         mainHandler.postDelayed(r, BUFFER_DEBOUNCE_MS)

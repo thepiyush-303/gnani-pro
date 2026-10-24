@@ -722,13 +722,16 @@ class OverlayService : Service() {
 
         // ── Action Buttons ──
         view.findViewById<View>(R.id.btn_improve)?.setOnClickListener {
-            Toast.makeText(applicationContext, "✨ Improve Text (Gnani Evon) — coming soon", Toast.LENGTH_SHORT).show()
+            val draft = ChatAccessibilityService.instance?.readInputFieldText()
+            IndicContextModule.instance?.emitActionTriggered("improve", draft)
         }
         view.findViewById<View>(R.id.btn_factcheck)?.setOnClickListener {
-            Toast.makeText(applicationContext, "🔍 Fact Check — coming soon", Toast.LENGTH_SHORT).show()
+            val draft = ChatAccessibilityService.instance?.readInputFieldText()
+            IndicContextModule.instance?.emitActionTriggered("factcheck", draft)
         }
         view.findViewById<View>(R.id.btn_icebreaker)?.setOnClickListener {
-            Toast.makeText(applicationContext, "🧊 Icebreaker — coming soon", Toast.LENGTH_SHORT).show()
+            val draft = ChatAccessibilityService.instance?.readInputFieldText()
+            IndicContextModule.instance?.emitActionTriggered("icebreaker", draft)
         }
 
         // ── 4. Touch & Glide Language Selector with Caret ──

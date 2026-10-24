@@ -68,6 +68,7 @@ class IndicContextModule : Module() {
             "onVoiceTranscript",
             "onRecordingStateChanged",
             "onCopilotDisabled",
+            "onActionTriggered",
         )
 
         // ── Permissions ───────────────────────────────────────────
@@ -251,18 +252,28 @@ class IndicContextModule : Module() {
         AsyncFunction("readInputFieldText") {
             ChatAccessibilityService.instance?.readInputFieldText() ?: ""
         }
+
+        AsyncFunction("getActiveThread") {
+            val svc = ChatAccessibilityService.instance
+            mapOf(
+                "threadTitle" to svc?.activeThreadTitle,
+                "threadId" to svc?.activeThreadId,
+            )
+        }
     }
 
     // ───────────────────────────────────────────────────────────────
     // Emit helpers — called by ChatAccessibilityService on main thread
     // ───────────────────────────────────────────────────────────────
 
-    fun emitBufferUpdated(snapshot: List<ChatBubble>) {
+    fun emitBufferUpdated(snapshot: List<ChatBubble>, threadTitle: String? = null, threadId: String? = null) {
         try {
             sendEvent(
                 "onBufferUpdated",
                 mapOf(
-                    "buffer" to snapshot.map { b ->
+                    "threadTitle"   to threadTitle,
+                    "threadId"      to threadId,
+                    "buffer"        to snapshot.map { b ->
                         mapOf(
                             "text"          to b.text,
                             "isSelf"        to b.isSelf,
@@ -275,6 +286,20 @@ class IndicContextModule : Module() {
             )
         } catch (e: Exception) {
             android.util.Log.w("IndicContextModule", "emitBufferUpdated: ${e.message}")
+        }
+    }
+
+    fun emitActionTriggered(action: String, draftText: String?) {
+        try {
+            sendEvent(
+                "onActionTriggered",
+                mapOf(
+                    "action"    to action,
+                    "draftText" to (draftText ?: ""),
+                )
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("IndicContextModule", "emitActionTriggered: ${e.message}")
         }
     }
 

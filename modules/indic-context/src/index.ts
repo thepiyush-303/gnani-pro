@@ -12,8 +12,8 @@ import { EventEmitter, NativeModulesProxy, requireNativeModule } from 'expo-modu
 export interface ChatBubble {
   /** The visible text content of the chat bubble */
   text: string;
-  /** true = sent by the local user; false = received from the other party */
-  isSelf: boolean;
+  /** true = sent by the local user; false = received from the other party; null = indeterminate */
+  isSelf: boolean | null;
   /** Unix timestamp (ms) at which this bubble was captured */
   capturedAtMs: number;
   /** Android node class name, e.g. "android.widget.TextView" */
@@ -40,6 +40,15 @@ export type OverlayMode = 'INPUT_BAR' | 'EDGE_SLIDER';
 
 export interface BufferUpdatedEvent {
   buffer: ChatBubble[];
+  threadTitle?: string | null;
+  threadId?: string | null;
+}
+
+export interface ActionTriggeredEvent {
+  /** The action triggered by the user on the floating toolbar */
+  action: 'improve' | 'factcheck' | 'icebreaker';
+  /** The text currently in the input field when the action was tapped */
+  draftText?: string;
 }
 
 export interface InputFieldEvent {
@@ -149,6 +158,17 @@ export async function setOverlayMode(mode: OverlayMode): Promise<void> {
  */
 export async function getSessionBuffer(): Promise<ChatBubble[]> {
   return NativeModule.getSessionBuffer();
+}
+
+/**
+ * Returns the currently active chat thread title (e.g. WhatsApp contact name)
+ * and anonymized thread ID.
+ */
+export async function getActiveThread(): Promise<{
+  threadTitle: string | null;
+  threadId: string | null;
+}> {
+  return NativeModule.getActiveThread();
 }
 
 // ─── Text Injection ───────────────────────────────────────────────────────────
@@ -292,6 +312,15 @@ export function addCopilotDisabledListener(
   return emitter.addListener('onCopilotDisabled', listener);
 }
 
+/**
+ * Fires when an action button (Improve, Fact Check, Icebreaker) is tapped on the overlay toolbar.
+ */
+export function addActionTriggeredListener(
+  listener: (event: ActionTriggeredEvent) => void,
+) {
+  return emitter.addListener<ActionTriggeredEvent>('onActionTriggered', listener);
+}
+
 // ─── Default export (convenience object) ─────────────────────────────────────
 
 const IndicContext = {
@@ -301,6 +330,7 @@ const IndicContext = {
   stopOverlay,
   setOverlayMode,
   getSessionBuffer,
+  getActiveThread,
   injectText,
   readInputFieldText,
   setGnaniConfig,
@@ -316,6 +346,7 @@ const IndicContext = {
   addVoiceTranscriptListener,
   addRecordingStateListener,
   addCopilotDisabledListener,
+  addActionTriggeredListener,
 };
 
 export default IndicContext;

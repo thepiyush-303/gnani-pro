@@ -23,6 +23,7 @@ class SessionBuffer {
     private val deque = ArrayDeque<ChatBubble>(MAX_CAPACITY + 1)
     private val seenKeys = HashSet<String>(MAX_CAPACITY * 2)
     private var currentPackage: String? = null
+    private var currentThreadId: String? = null
 
     companion object {
         /** Maximum number of chat bubbles retained in memory. */
@@ -73,8 +74,31 @@ class SessionBuffer {
         if (newPackage == currentPackage) return false
         Log.i(TAG, "App changed: $currentPackage → $newPackage. Clearing buffer.")
         currentPackage = newPackage
+        currentThreadId = null
         clear()
         return true
+    }
+
+    /**
+     * Clears the buffer if either the host app or the specific chat thread changed.
+     * Prevents context leakage across distinct conversation threads within WhatsApp.
+     */
+    @Synchronized
+    fun resetIfThreadChanged(newPackage: String, newThreadId: String?): Boolean {
+        val appChanged = newPackage != currentPackage
+        val threadChanged = newThreadId != null && currentThreadId != null && newThreadId != currentThreadId
+
+        if (appChanged || threadChanged) {
+            Log.i(TAG, "Thread boundary crossed: ($currentPackage, $currentThreadId) → ($newPackage, $newThreadId). Clearing buffer.")
+            currentPackage = newPackage
+            currentThreadId = newThreadId
+            clear()
+            return true
+        }
+        if (currentThreadId == null && newThreadId != null) {
+            currentThreadId = newThreadId
+        }
+        return false
     }
 
     // ───────────────────────────────────────────────────────────────
