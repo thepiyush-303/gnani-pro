@@ -521,6 +521,7 @@ class ChatAccessibilityService : AccessibilityService() {
         activeThreadId = null
         clearFocusedNode()
         OverlayService.instance?.hideOverlay(immediate = true)
+        OverlayService.instance?.hideRecommendations()
     }
 
     private fun clearFocusedNode() {
@@ -671,11 +672,37 @@ class ChatAccessibilityService : AccessibilityService() {
 
     fun getBuffer(): List<ChatBubble> = buffer.snapshot()
 
-    fun readInputFieldText(): String? = focusedInputNode?.text?.toString()
+    fun readInputFieldText(): String? {
+        try {
+            focusedInputNode?.refresh()
+            val text = focusedInputNode?.text?.toString()
+            if (!text.isNullOrBlank()) return text
+        } catch (e: Exception) {}
+
+        // Fallback: search tree for active or fallback EditText
+        val active = findActiveEditText()
+        if (active != null) {
+            val t = active.text?.toString()
+            if (focusedInputNode == null) {
+                focusedInputNode = active
+            } else if (focusedInputNode !== active) {
+                try { active.recycle() } catch (e: Exception) {}
+            }
+            return t
+        }
+        return null
+    }
 
     fun injectText(text: String): Boolean {
-        val node = focusedInputNode ?: run {
-            Log.w(TAG, "injectText: no focused input node")
+        var node = focusedInputNode
+        if (node == null) {
+            node = findActiveEditText()
+            if (node != null) {
+                focusedInputNode = node
+            }
+        }
+        val target = node ?: run {
+            Log.w(TAG, "injectText: no focused or active input node")
             return false
         }
 
@@ -683,7 +710,7 @@ class ChatAccessibilityService : AccessibilityService() {
             val args = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
             }
-            if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+            if (target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
                 Log.i(TAG, "injectText: ACTION_SET_TEXT succeeded")
                 return true
             }
@@ -693,7 +720,7 @@ class ChatAccessibilityService : AccessibilityService() {
         return try {
             val clip = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clip.setPrimaryClip(ClipData.newPlainText("copilot_inject", text))
-            val ok = node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            val ok = target.performAction(AccessibilityNodeInfo.ACTION_PASTE)
             Log.i(TAG, "injectText: clipboard paste result=$ok")
             ok
         } catch (e: Exception) {

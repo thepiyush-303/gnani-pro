@@ -385,6 +385,160 @@ class OverlayService : Service() {
         stopSelf()
     }
 
+    // ── Smart Reply & Recommendations Floating Card ──
+    private var recommendationView: View? = null
+    private var recommendationParams: WindowManager.LayoutParams? = null
+    private var lastShownSuggestions: List<String> = emptyList()
+    private var lastShownTitle: String = ""
+
+    fun showRecommendations(title: String, subtitle: String?, suggestions: List<String>) {
+        mainHandler.post {
+            val wm = windowManager ?: return@post
+            if (suggestions.isEmpty()) return@post
+
+            // If identical suggestions are already displayed, avoid any DOM reconstruction
+            if (recommendationView != null && lastShownSuggestions == suggestions && lastShownTitle == title) {
+                return@post
+            }
+
+            lastShownSuggestions = suggestions
+            lastShownTitle = title
+
+            val existingView = recommendationView
+            if (existingView != null) {
+                // Update in place to prevent any flickering
+                val txtTitle = existingView.findViewById<TextView>(R.id.txt_recommendation_title)
+                val txtSub = existingView.findViewById<TextView>(R.id.txt_recommendation_subtitle)
+                val chip1 = existingView.findViewById<TextView>(R.id.chip_recommendation_1)
+                val chip2 = existingView.findViewById<TextView>(R.id.chip_recommendation_2)
+                val chip3 = existingView.findViewById<TextView>(R.id.chip_recommendation_3)
+
+                txtTitle?.text = title
+                if (!subtitle.isNullOrBlank()) {
+                    txtSub?.text = subtitle
+                    txtSub?.visibility = View.VISIBLE
+                }
+
+                val chips = listOf(chip1, chip2, chip3)
+                chips.forEach { it?.visibility = View.GONE }
+
+                for (i in 0 until minOf(suggestions.size, chips.size)) {
+                    val chip = chips[i] ?: continue
+                    val text = suggestions[i]
+                    chip.text = text
+                    chip.visibility = View.VISIBLE
+                    chip.setOnClickListener {
+                        val ok = ChatAccessibilityService.instance?.injectText(text) ?: false
+                        if (ok) {
+                            Toast.makeText(applicationContext, "Injected: $text", Toast.LENGTH_SHORT).show()
+                        }
+                        hideRecommendations()
+                    }
+                }
+                return@post
+            }
+
+            // Otherwise inflate and add new window
+            val view = LayoutInflater.from(this).inflate(R.layout.overlay_recommendations, null)
+            val txtTitle = view.findViewById<TextView>(R.id.txt_recommendation_title)
+            val txtSub = view.findViewById<TextView>(R.id.txt_recommendation_subtitle)
+            val btnClose = view.findViewById<View>(R.id.btn_close_recommendations)
+            val chip1 = view.findViewById<TextView>(R.id.chip_recommendation_1)
+            val chip2 = view.findViewById<TextView>(R.id.chip_recommendation_2)
+            val chip3 = view.findViewById<TextView>(R.id.chip_recommendation_3)
+
+            txtTitle?.text = title
+            if (!subtitle.isNullOrBlank()) {
+                txtSub?.text = subtitle
+                txtSub?.visibility = View.VISIBLE
+            }
+
+            btnClose?.setOnClickListener {
+                hideRecommendations()
+            }
+
+            val chips = listOf(chip1, chip2, chip3)
+            chips.forEach { it?.visibility = View.GONE }
+
+            for (i in 0 until minOf(suggestions.size, chips.size)) {
+                val chip = chips[i] ?: continue
+                val text = suggestions[i]
+                chip.text = text
+                chip.visibility = View.VISIBLE
+                chip.setOnClickListener {
+                    val ok = ChatAccessibilityService.instance?.injectText(text) ?: false
+                    if (ok) {
+                        Toast.makeText(applicationContext, "Injected: $text", Toast.LENGTH_SHORT).show()
+                    }
+                    hideRecommendations()
+                }
+            }
+
+            val density = resources.displayMetrics.density
+            val screenW = resources.displayMetrics.widthPixels
+            val screenH = resources.displayMetrics.heightPixels
+            val cardWidth = (290 * density).toInt()
+
+            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+
+            val p = WindowManager.LayoutParams(
+                cardWidth,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                type,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                val currentY = overlayParams?.y ?: (screenH / 2)
+                y = (currentY - (175 * density).toInt()).coerceIn((40 * density).toInt(), screenH - (250 * density).toInt())
+                x = if (currentEdge == Edge.RIGHT) {
+                    (screenW - cardWidth - (12 * density).toInt()).coerceAtLeast(0)
+                } else {
+                    (12 * density).toInt()
+                }
+            }
+
+            recommendationView = view
+            recommendationParams = p
+
+            try {
+                wm.addView(view, p)
+                view.alpha = 0f
+                view.scaleY = 0.95f
+                view.animate().alpha(1f).scaleY(1f).setDuration(160).start()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to show recommendation view: ${e.message}")
+            }
+        }
+    }
+
+    fun hideRecommendations() {
+        mainHandler.post {
+            lastShownSuggestions = emptyList()
+            lastShownTitle = ""
+            val wm = windowManager ?: return@post
+            val view = recommendationView ?: return@post
+            try {
+                view.animate().alpha(0f).scaleY(0.95f).setDuration(100).withEndAction {
+                    try {
+                        wm.removeView(view)
+                    } catch (e: Exception) {}
+                    if (recommendationView === view) {
+                        recommendationView = null
+                        recommendationParams = null
+                    }
+                }.start()
+            } catch (e: Exception) {
+                try { wm.removeView(view) } catch (ignore: Exception) {}
+                recommendationView = null
+                recommendationParams = null
+            }
+        }
+    }
+
     // ── Dynamic Edge Layout Reversal & Flush Bezel Fit ─────────────────
 
     private fun applyEdgeLayout(edge: Edge) {

@@ -260,6 +260,18 @@ class IndicContextModule : Module() {
                 "threadId" to svc?.activeThreadId,
             )
         }
+
+        // ── Smart Reply & Recommendation Overlay ──────────────────
+
+        AsyncFunction("showSmartReplies") { title: String, subtitle: String?, suggestions: List<String> ->
+            OverlayService.instance?.showRecommendations(title, subtitle, suggestions)
+            Unit
+        }
+
+        AsyncFunction("hideSmartReplies") {
+            OverlayService.instance?.hideRecommendations()
+            Unit
+        }
     }
 
     // ───────────────────────────────────────────────────────────────

@@ -129,3 +129,32 @@ export interface IcebreakerResult {
   suggestions: string[];
   category?: 'reconnect' | 'conversation_starter' | 'followup';
 }
+
+/**
+ * Concrete Persistent Thread Context Profile
+ */
+export interface ThreadContextProfile {
+  threadId: string;
+  threadTitle: string;
+  persona: PersonaType;
+  formalityLevel: 1 | 2 | 3 | 4 | 5;
+  languageStyle: 'hinglish' | 'english' | 'hindi';
+  hinglishRatio: number;
+  sentimentTone: 'casual' | 'formal' | 'respectful' | 'friendly';
+  recentTopics: string[];
+  pendingQuestions: string[];
+  lastIncomingMessage?: string;
+  lastOutgoingMessage?: string;
+  messageCount: number;
+  lastUpdatedMs: number;
+}
+
+/**
+ * Dynamic Smart Reply Recommendations
+ */
+export interface SmartReplyResult {
+  suggestions: string[];
+  reason: string;
+  detectedTone: string;
+  languageUsed: string;
+}

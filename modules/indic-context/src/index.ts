@@ -191,6 +191,27 @@ export async function readInputFieldText(): Promise<string> {
   return NativeModule.readInputFieldText();
 }
 
+// ─── Smart Reply & Recommendation Overlay ─────────────────────────────────────
+
+/**
+ * Displays a floating dark-glass card with context-aware smart replies
+ * directly anchored to the copilot pill/toolbar.
+ */
+export async function showSmartReplies(
+  title: string,
+  subtitle: string | null,
+  suggestions: string[],
+): Promise<void> {
+  return NativeModule.showSmartReplies(title, subtitle ?? null, suggestions);
+}
+
+/**
+ * Dismisses the floating smart reply card if visible.
+ */
+export async function hideSmartReplies(): Promise<void> {
+  return NativeModule.hideSmartReplies();
+}
+
 // ─── Voice-to-Text & Gnani STT (Phase 3) ──────────────────────────────────────
 
 /**
@@ -333,6 +354,8 @@ const IndicContext = {
   getActiveThread,
   injectText,
   readInputFieldText,
+  showSmartReplies,
+  hideSmartReplies,
   setGnaniConfig,
   getGnaniConfig,
   setLanguage,

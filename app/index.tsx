@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -28,6 +28,7 @@ import {
   ToneOption,
   ToneSensitivityResult,
   FactCheckResult,
+  ThreadContextProfile,
 } from '../src/types/context';
 import {
   getListenerContext,
@@ -44,6 +45,16 @@ import {
   generateIcebreakers,
   summarizeThread,
 } from '../src/services/gnaniEvonLlm';
+import {
+  getGlobalUserIntent,
+  getThreadContext,
+  updateContextFromBubbles,
+} from '../src/services/conversationContextDb';
+import {
+  generateContextualIcebreakers,
+  generateSmartReplies,
+  improveMessageWithContext,
+} from '../src/services/contextIntelligenceEngine';
 
 // ─────────────────────────────────────────────
 // Types
@@ -138,6 +149,16 @@ export default function DashboardScreen() {
   const [activeListener, setActiveListener] = useState<ListenerContext | null>(null);
   const [currentBuffer, setCurrentBuffer] = useState<ChatBubble[]>([]);
 
+  // Live Recommendations & Icebreakers state (visible in app dashboard)
+  const [liveSmartReplies, setLiveSmartReplies] = useState<string[]>([]);
+  const [liveSmartReplySubtitle, setLiveSmartReplySubtitle] = useState<string>('');
+  const [liveIcebreakers, setLiveIcebreakers] = useState<string[]>([]);
+  const [isGeneratingLiveIce, setIsGeneratingLiveIce] = useState(false);
+  const [activeProfile, setActiveProfile] = useState<ThreadContextProfile | null>(null);
+
+  // References to debounce and prevent constant re-generation / flickering
+  const lastHandledMsgRef = useRef<string>('');
+
   // Tier 3: Global User Persona state
   const [globalPersona, setGlobalPersona] = useState<GlobalUserPersona | null>(null);
 
@@ -175,9 +196,12 @@ export default function DashboardScreen() {
 
   // Subscribe to Native Events
   useEffect(() => {
-    const bufferSub = IndicContext.addBufferListener(({ buffer, threadTitle, threadId }) => {
+    const bufferSub = IndicContext.addBufferListener(async ({ buffer, threadTitle, threadId }) => {
       setBufferCount(buffer.length);
       setCurrentBuffer(buffer as ChatBubble[]);
+
+      const activeTitle = threadTitle || 'Contact';
+      const activeId = threadId || 'default_thread';
 
       if (threadTitle) {
         setActiveThreadTitle(threadTitle);
@@ -187,6 +211,44 @@ export default function DashboardScreen() {
         getListenerContext(threadId, threadTitle || undefined)
           .then(setActiveListener)
           .catch(() => {});
+      }
+
+      // ── Concrete Persistent Context Management in DB ──
+      try {
+        const profile = await updateContextFromBubbles(activeId, activeTitle, buffer as ChatBubble[]);
+        setActiveProfile(profile);
+        const globalIntent = await getGlobalUserIntent();
+
+        // ── Smart Reply Recommendations on Pill ──
+        if (buffer.length > 0) {
+          const lastMsg = buffer[buffer.length - 1];
+          const msgKey = `${activeId}:${lastMsg.text.trim()}`;
+
+          // Only generate when the incoming message has actually changed
+          if (lastMsg.isSelf === false && lastMsg.text.trim()) {
+            if (msgKey !== lastHandledMsgRef.current) {
+              lastHandledMsgRef.current = msgKey;
+              const replies = await generateSmartReplies(
+                lastMsg.text,
+                profile,
+                globalIntent,
+                buffer as ChatBubble[],
+              );
+              if (replies.suggestions.length > 0) {
+                setLiveSmartReplies(replies.suggestions);
+                const sub = `${profile.persona} (${profile.languageStyle === 'hinglish' ? 'Hinglish' : 'English'})`;
+                setLiveSmartReplySubtitle(sub);
+                await IndicContext.showSmartReplies(
+                  `💡 Reply to ${profile.threadTitle}`,
+                  sub,
+                  replies.suggestions,
+                );
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[ContextDB] update error:', e);
       }
     });
 
@@ -238,34 +300,47 @@ export default function DashboardScreen() {
         const threadInfo = await IndicContext.getActiveThread();
         const threadId = threadInfo?.threadId || 'default_thread';
         const threadTitle = threadInfo?.threadTitle || 'Contact';
-        const listener = await getListenerContext(threadId, threadTitle);
-        const persona = await getGlobalPersona();
+
+        const profile = await getThreadContext(threadId, threadTitle);
+        const globalIntent = await getGlobalUserIntent();
         const rawDraft = event.draftText || (await IndicContext.readInputFieldText()) || '';
 
         if (event.action === 'improve') {
-          // Step 1: Tone & Respect Check
-          if (rawDraft.trim()) {
-            const toneCheck = await checkToneSensitivity(rawDraft, listener, buffer, persona);
-            if (toneCheck.isDisrespectful && toneCheck.suggestedDraft) {
-              await IndicContext.injectText(toneCheck.suggestedDraft);
-              Alert.alert(
-                '✨ Tone Adjusted for ' + listener.persona,
-                toneCheck.reasons.join('\n') + '\n\nInjected respectful alternative.',
-              );
-              return;
-            }
+          // Check if user drafted anything
+          if (!rawDraft.trim()) {
+            Alert.alert(
+              '✏️ No Message Drafted',
+              'Please type your draft message in the WhatsApp input bar first, then tap ✨ Improve to enhance it.',
+            );
+            return;
           }
-          // Step 2: Contextual Update Enhancement
-          const enhanced = await enhanceUpdateWithContext(
-            rawDraft || 'Done',
+
+          // Context-aware improvement considering relationship persona and conversational style
+          const improved = await improveMessageWithContext(
+            rawDraft,
+            profile,
+            globalIntent,
             buffer,
-            persona.defaultTone,
-            3,
-            listener,
           );
-          if (enhanced.enhancedDraft) {
-            await IndicContext.injectText(enhanced.enhancedDraft);
-          }
+
+          Alert.alert(
+            '✨ Replace Message?',
+            `Original:\n"${rawDraft}"\n\nImproved (${profile.persona} • ${profile.formalityLevel >= 4 ? 'Formal' : 'Casual'}):\n"${improved.improvedDraft}"\n\n${improved.explanation}`,
+            [
+              { text: 'Keep Original', style: 'cancel' },
+              {
+                text: 'Replace in Chat',
+                style: 'default',
+                onPress: async () => {
+                  try {
+                    await IndicContext.injectText(improved.improvedDraft);
+                  } catch (e: any) {
+                    Alert.alert('Injection Failed', e?.message || 'Could not replace text in WhatsApp.');
+                  }
+                },
+              },
+            ],
+          );
         } else if (event.action === 'factcheck') {
           if (!rawDraft.trim()) {
             Alert.alert('🔍 Fact Check', 'Please draft a message in the input field first.');
@@ -296,11 +371,23 @@ export default function DashboardScreen() {
             Alert.alert('✓ Fact Check Passed', 'No factual inconsistencies or contradictions found with earlier messages.');
           }
         } else if (event.action === 'icebreaker') {
-          const iceResult = await generateIcebreakers(buffer, listener, persona);
+          // Contextual icebreakers (continuation of incomplete topic, follow-up, authentic opener)
+          const iceResult = await generateContextualIcebreakers(buffer, profile, globalIntent);
+
           if (iceResult.suggestions.length > 0) {
+            setLiveIcebreakers(iceResult.suggestions);
+
+            // Show overlay recommendation card directly on WhatsApp
+            IndicContext.showSmartReplies(
+              `🧊 Icebreakers for ${profile.threadTitle}`,
+              `Tailored for ${profile.persona} (${profile.languageStyle})`,
+              iceResult.suggestions,
+            ).catch(() => {});
+
+            // Also show dialog in case user is viewing from dashboard
             Alert.alert(
-              `🧊 Icebreakers for ${listener.threadTitle} (${listener.persona})`,
-              'Select an opener to inject:',
+              `🧊 Icebreakers for ${profile.threadTitle} (${profile.persona})`,
+              'Select an opener to inject into chat:',
               [
                 ...iceResult.suggestions.map((s, idx) => ({
                   text: `${idx + 1}. ${s}`,
@@ -488,6 +575,44 @@ export default function DashboardScreen() {
       setIsAnalyzing(false);
     }
   }, [currentBuffer, activeListener, globalPersona]);
+
+  // ── Live Smart Replies & Icebreaker Actions ──
+  const handleGenerateLiveIcebreakers = useCallback(async () => {
+    setIsGeneratingLiveIce(true);
+    try {
+      const threadInfo = await IndicContext.getActiveThread();
+      const threadId = threadInfo?.threadId || activeThreadId || 'default_thread';
+      const threadTitle = threadInfo?.threadTitle || activeThreadTitle || 'Contact';
+      const profile = activeProfile || (await getThreadContext(threadId, threadTitle));
+      const globalIntent = await getGlobalUserIntent();
+      const buffer = currentBuffer.length > 0 ? currentBuffer : ((await IndicContext.getSessionBuffer()) as ChatBubble[]);
+
+      const iceResult = await generateContextualIcebreakers(buffer, profile, globalIntent);
+      setLiveIcebreakers(iceResult.suggestions);
+
+      if (iceResult.suggestions.length > 0) {
+        IndicContext.showSmartReplies(
+          `🧊 Icebreakers for ${profile.threadTitle}`,
+          `Tailored for ${profile.persona} (${profile.languageStyle})`,
+          iceResult.suggestions,
+        ).catch(() => {});
+      }
+    } catch (e: any) {
+      Alert.alert('Icebreaker Error', e?.message || 'Failed to generate icebreakers.');
+    } finally {
+      setIsGeneratingLiveIce(false);
+    }
+  }, [activeThreadId, activeThreadTitle, activeProfile, currentBuffer]);
+
+  const handleInjectReply = useCallback(async (text: string) => {
+    try {
+      await IndicContext.injectText(text);
+      Alert.alert('✓ Injected into Chat', `Pasted directly into WhatsApp message bar:\n"${text}"`);
+    } catch (e: any) {
+      Clipboard.setString(text);
+      Alert.alert('Copied to Clipboard', `Pasting requires WhatsApp to be open with input bar active.\n\nCopied to clipboard:\n"${text}"`);
+    }
+  }, []);
 
   // ── Grant handlers ──
   const openOverlaySettings = useCallback(() => {
@@ -694,6 +819,88 @@ export default function DashboardScreen() {
                 ))}
               </View>
             )}
+          </View>
+        )}
+      </View>
+
+      {/* ── Live Smart Replies & Recommendations Card ── */}
+      <Text style={styles.sectionHeader}>💡 Live Smart Replies (Context Recommendations)</Text>
+      <View style={styles.card}>
+        <View style={styles.cardHeaderRow}>
+          <Text style={styles.subLabel}>
+            {activeThreadTitle
+              ? `Recommended for: ${activeThreadTitle} (${liveSmartReplySubtitle || 'Analyzing tone...'})`
+              : 'Waiting for chat message in WhatsApp...'}
+          </Text>
+        </View>
+
+        {liveSmartReplies.length > 0 ? (
+          <View style={styles.recommendationsList}>
+            {liveSmartReplies.map((reply, idx) => (
+              <View key={idx} style={styles.recommendationItem}>
+                <Text style={styles.recommendationText}>"{reply}"</Text>
+                <TouchableOpacity
+                  style={styles.injectSmallBtn}
+                  onPress={() => handleInjectReply(reply)}
+                >
+                  <Text style={styles.injectSmallBtnText}>Inject ↵</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.emptyStateText}>
+            No incoming message analyzed yet. When a contact sends you a message on WhatsApp, 3 style-matched quick replies will appear here and above the floating pill.
+          </Text>
+        )}
+      </View>
+
+      {/* ── Live Contextual Icebreakers Card ── */}
+      <Text style={styles.sectionHeader}>🧊 Contextual Icebreakers</Text>
+      <View style={styles.card}>
+        <View style={styles.cardHeaderRow}>
+          <Text style={styles.subLabel}>
+            {activeThreadTitle
+              ? `Tailored openers for ${activeThreadTitle} (${activeListener?.persona || 'Colleague'}):`
+              : 'Contextual openers for active conversation:'}
+          </Text>
+          <TouchableOpacity
+            style={styles.refreshBtn}
+            onPress={handleGenerateLiveIcebreakers}
+            disabled={isGeneratingLiveIce}
+          >
+            {isGeneratingLiveIce ? (
+              <ActivityIndicator color="#00E5FF" size="small" />
+            ) : (
+              <Text style={styles.refreshBtnText}>🔄 Generate</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {liveIcebreakers.length > 0 ? (
+          <View style={styles.recommendationsList}>
+            {liveIcebreakers.map((ice, idx) => (
+              <View key={idx} style={styles.recommendationItem}>
+                <View style={styles.icebreakerTextCol}>
+                  <Text style={styles.icebreakerCategoryBadge}>
+                    {idx === 0 ? '1. Continuation' : idx === 1 ? '2. Follow-Up' : '3. Check-In'}
+                  </Text>
+                  <Text style={styles.recommendationText}>"{ice}"</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.injectSmallBtn}
+                  onPress={() => handleInjectReply(ice)}
+                >
+                  <Text style={styles.injectSmallBtnText}>Inject ↵</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <View style={styles.icebreakerEmptyRow}>
+            <Text style={styles.emptyStateText}>
+              Tap "Generate" to create context-aware opening lines that continue prior topics or follow up on recent updates.
+            </Text>
           </View>
         )}
       </View>
@@ -1144,6 +1351,77 @@ const styles = StyleSheet.create({
   summarySubSection: { marginTop: 8 },
   summarySubHeading: { fontSize: 11, color: '#38BDF8', fontWeight: '700', marginBottom: 2 },
   summaryBullet: { fontSize: 12, color: '#CBD5E1', lineHeight: 16, marginLeft: 4 },
+
+  // Live Recommendations & Icebreakers
+  cardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  recommendationsList: {
+    gap: 8,
+    marginTop: 4,
+  },
+  recommendationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    gap: 8,
+  },
+  recommendationText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#F8FAFC',
+    lineHeight: 18,
+  },
+  injectSmallBtn: {
+    backgroundColor: '#0284C7',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  injectSmallBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  emptyStateText: {
+    fontSize: 12,
+    color: '#64748B',
+    lineHeight: 18,
+    fontStyle: 'italic',
+    paddingVertical: 4,
+  },
+  refreshBtn: {
+    backgroundColor: '#334155',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  refreshBtnText: {
+    color: '#00E5FF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  icebreakerTextCol: {
+    flex: 1,
+  },
+  icebreakerCategoryBadge: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#38BDF8',
+    marginBottom: 2,
+    textTransform: 'uppercase',
+  },
+  icebreakerEmptyRow: {
+    paddingVertical: 4,
+  },
 
   // Test Bench
   testInput: {
