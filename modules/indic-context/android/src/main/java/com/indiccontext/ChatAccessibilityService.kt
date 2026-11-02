@@ -75,6 +75,9 @@ class ChatAccessibilityService : AccessibilityService() {
         @Volatile
         var instance: ChatAccessibilityService? = null
             private set
+
+        @Volatile
+        var lastKnownInputText: String = ""
     }
 
     override fun onServiceConnected() {
@@ -85,6 +88,8 @@ class ChatAccessibilityService : AccessibilityService() {
             eventTypes =
                 AccessibilityEvent.TYPE_VIEW_FOCUSED or
                 AccessibilityEvent.TYPE_VIEW_CLICKED or
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED or
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED or
                 AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
                 AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
                 AccessibilityEvent.TYPE_VIEW_SCROLLED or
@@ -92,7 +97,7 @@ class ChatAccessibilityService : AccessibilityService() {
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
             flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
                 AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-            notificationTimeout = 100
+            notificationTimeout = 50
         }
         serviceInfo = info
         Log.i(TAG, "Connected.")
@@ -210,9 +215,33 @@ class ChatAccessibilityService : AccessibilityService() {
                     scheduleVerifiedInputLoss()
                 } else if (isEdit) {
                     handleFocusEvent(node, "com.whatsapp")
+                    val currentText = node.text?.toString() ?: ""
+                    if (currentText.isNotBlank()) {
+                        lastKnownInputText = currentText
+                    }
                     return
                 }
                 node.recycle()
+            }
+
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
+                if (!isSupportedAppInForeground()) return
+                val textList = event.text
+                if (!textList.isNullOrEmpty()) {
+                    val typed = textList.joinToString("").trim()
+                    if (typed.isNotBlank()) {
+                        lastKnownInputText = typed
+                    }
+                }
+                val node = event.source
+                if (node != null && node.className?.contains("EditText", true) == true) {
+                    focusedInputNode = node
+                    val nodeText = node.text?.toString() ?: ""
+                    if (nodeText.isNotBlank()) {
+                        lastKnownInputText = nodeText
+                    }
+                }
             }
 
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
@@ -676,24 +705,35 @@ class ChatAccessibilityService : AccessibilityService() {
         try {
             focusedInputNode?.refresh()
             val text = focusedInputNode?.text?.toString()
-            if (!text.isNullOrBlank()) return text
+            if (!text.isNullOrBlank()) {
+                lastKnownInputText = text
+                return text
+            }
         } catch (e: Exception) {}
 
         // Fallback: search tree for active or fallback EditText
         val active = findActiveEditText()
         if (active != null) {
             val t = active.text?.toString()
-            if (focusedInputNode == null) {
-                focusedInputNode = active
-            } else if (focusedInputNode !== active) {
-                try { active.recycle() } catch (e: Exception) {}
+            if (!t.isNullOrBlank()) {
+                lastKnownInputText = t
+                if (focusedInputNode == null) {
+                    focusedInputNode = active
+                } else if (focusedInputNode !== active) {
+                    try { active.recycle() } catch (e: Exception) {}
+                }
+                return t
             }
-            return t
+        }
+
+        if (lastKnownInputText.isNotBlank()) {
+            return lastKnownInputText
         }
         return null
     }
 
     fun injectText(text: String): Boolean {
+        lastKnownInputText = text
         var node = focusedInputNode
         if (node == null) {
             node = findActiveEditText()

@@ -168,22 +168,71 @@ export async function updateGlobalUserIntent(
 
 // ─── Context Analysis & Style Fingerprinting ────────────────────────────────
 
-const HINGLISH_MARKERS = new Set([
-  'hai', 'bhai', 'yaar', 'kya', 'kaisa', 'kab', 'chal', 'theek', 'accha',
-  'aaj', 'kal', 'batao', 'bolo', 'bhej', 'raha', 'hu', 'ho', 'de', 'le',
-  'ha', 'haan', 'nahi', 'toh', 'aur', 'sab', 'sirf', 'kuch', 'bas', 'ek',
-  'kar', 'karo', 'gaya', 'aaya', 'sahi', 'pakka', 'jaldi', 'thoda', 'milte',
+export const COMPREHENSIVE_HINGLISH_WORDS = new Set([
+  // Pronouns & Demonstratives
+  'kya', 'hai', 'hain', 'ho', 'hu', 'tha', 'the', 'thi', 'hum', 'tum', 'tu', 'aap',
+  'tera', 'teri', 'tere', 'mera', 'meri', 'mere', 'apna', 'apni', 'apne', 'iska',
+  'uska', 'inhe', 'unhe', 'kisko', 'mujhe', 'tujhe', 'hume', 'aapko', 'sab', 'kuch', 'koi',
+  // Interrogatives
+  'kaisa', 'kaisi', 'kaise', 'kab', 'kaha', 'kidhar', 'kitna', 'kitne', 'kitni', 'kyun', 'kyu',
+  // Relational & Slang
+  'bhai', 'yaar', 'dost', 'bro', 'sir', 'ji', 'boss', 'dude', 'banda', 'bandi', 'scene',
+  'sorted', 'lite', 'tension', 'mast', 'arrey', 'arre', 'arey', 'oye', 'abe', 'acha', 'accha',
+  'sahi', 'theek', 'thik', 'pakka', 'waah',
+  // Verbs & Actions
+  'kar', 'karo', 'karna', 'karenge', 'karega', 'karegi', 'karu', 'kiya',
+  'dekh', 'dekho', 'dekhna', 'dekhta', 'sun', 'suno', 'sunna',
+  'bol', 'bolo', 'bolna', 'bata', 'batao', 'batana', 'bataiye',
+  'bhej', 'bhejo', 'bhejna', 'bhejta', 'bhejoge', 'bheji',
+  'gaya', 'gayi', 'gaye', 'jaa', 'jao', 'jaana', 'jayenge', 'jaunga',
+  'aaya', 'aayi', 'aaye', 'aa', 'aao', 'aana', 'aayenge', 'aaunga',
+  'mil', 'milte', 'milna', 'milenge', 'milta',
+  'le', 'lo', 'lena', 'lenge', 'de', 'do', 'dena', 'denge',
+  'rakh', 'rakho', 'rakhna', 'chal', 'chalo', 'chalte', 'chalega', 'chalegi',
+  'ruk', 'ruko', 'rukna', 'baith', 'uth', 'utha', 'khao', 'peeyo',
+  // Adverbs, Prepositions, Time
+  'aaj', 'kal', 'parso', 'abhi', 'baad', 'pehle', 'subah', 'shaam', 'raat', 'dopahar',
+  'thoda', 'thodi', 'zyada', 'sirf', 'bas', 'ek', 'do', 'teen',
+  'nahi', 'nhi', 'na', 'ha', 'haan', 'hanji', 'hnji',
+  'toh', 'to', 'par', 'lekin', 'aur', 'waise', 'fir', 'phir', 'bhi', 'saath', 'bina',
+  'andar', 'bahar', 'upar', 'neeche', 'aage', 'peeche', 'wahan', 'yahan',
+  'jaldi', 'dheere', 'fasa', 'fasaa', 'busy'
 ]);
 
 const FORMAL_WORDS = new Set([
   'sir', 'madam', 'kindly', 'please', 'regarding', 'request', 'status',
   'update', 'milestone', 'deliverable', 'review', 'forwarded', 'attached',
   'schedule', 'agenda', 'confirm', 'urgent', 'appreciate', 'sincerely',
+  'kripya', 'anurodh', 'dhanyawad', 'pranam', 'namaste', 'namaskar', 'aapko', 'aapse',
 ]);
 
 const CASUAL_WORDS = new Set([
   'bro', 'dude', 'bhai', 'yaar', 'lol', 'haha', 'scene', 'chal', 'lite',
-  'sorted', 'chill', 'arrey', 'arre', 'waah', 'mast', 'tension',
+  'sorted', 'chill', 'arrey', 'arre', 'waah', 'mast', 'tension', 'tu', 'teri', 'tera',
+]);
+
+export const SLANG_WORDS = new Set([
+  'bc', 'mc', 'bhnchoo', 'behenchod', 'madarchod', 'lode', 'laude', 'chutiya', 'chutiye',
+  'baap', 'deadshot', 'khelenge', 'chid', 'chidna', 'bhadak', 'react', 'reaction',
+  'kalesh', 'lafda', 'natak', 'overacting', 'scene', 'lite', 'aaja', 'squad', 'dkh',
+  'rhta', 'horha', 'merko', 'merse', 'muje', 'mne', 'pauch', 'ni'
+]);
+
+export function getCleanFirstName(title: string): string {
+  if (!title) return 'bhai';
+  const cleaned = title.replace(/[^\w\s]/gi, '').trim();
+  const parts = cleaned.split(/\s+/);
+  return parts[0] || 'bhai';
+}
+
+const SEMANTIC_TOPIC_WHITELIST = new Set([
+  'deadshot', 'game', 'gaming', 'pubg', 'bgmi', 'cod', 'match',
+  'exp3', 'pdf', 'assignment', 'submission', 'lab', 'homework', 'exam', 'test', 'marks',
+  'train', 'flight', 'metro', 'trip', 'travel', 'station', 'tickets',
+  'cafe', 'coffee', 'dinner', 'lunch', 'party', 'food', 'outing',
+  'tannu', 'group', 'reaction', 'emoji', 'qr', 'photo', 'video',
+  'project', 'code', 'design', 'report', 'presentation', 'deck',
+  'meeting', 'sync', 'call', 'budget', 'invoice', 'payment'
 ]);
 
 export function analyzeConversationStyle(bubbles: ChatBubble[]): {
@@ -191,6 +240,7 @@ export function analyzeConversationStyle(bubbles: ChatBubble[]): {
   hinglishRatio: number;
   formalityLevel: 1 | 2 | 3 | 4 | 5;
   sentimentTone: 'casual' | 'formal' | 'respectful' | 'friendly';
+  inferredPersona: PersonaType;
   recentTopics: string[];
   pendingQuestions: string[];
   lastIncomingMessage?: string;
@@ -200,8 +250,9 @@ export function analyzeConversationStyle(bubbles: ChatBubble[]): {
     return {
       languageStyle: 'hinglish',
       hinglishRatio: 0.5,
-      formalityLevel: 3,
+      formalityLevel: 2,
       sentimentTone: 'friendly',
+      inferredPersona: 'Friend',
       recentTopics: [],
       pendingQuestions: [],
     };
@@ -211,6 +262,9 @@ export function analyzeConversationStyle(bubbles: ChatBubble[]): {
   let hinglishCount = 0;
   let formalCount = 0;
   let casualCount = 0;
+  let slangCount = 0;
+  let hasDevanagari = false;
+  let hasLaughingEmoji = false;
   const questions: string[] = [];
   const topics: string[] = [];
   let lastIncoming: string | undefined;
@@ -220,9 +274,16 @@ export function analyzeConversationStyle(bubbles: ChatBubble[]): {
     const text = b.text.trim();
     if (!text) continue;
 
+    if (/[\u0900-\u097F]/.test(text)) {
+      hasDevanagari = true;
+    }
+    if (/[😂🤣💀🔥❤️]/.test(text)) {
+      hasLaughingEmoji = true;
+    }
+
     if (b.isSelf === false) {
       lastIncoming = text;
-      if (text.includes('?') || /\b(kab|kya|kaisa|when|how|why|update|free)\b/i.test(text)) {
+      if (text.includes('?') || /\b(kab|kya|kaisa|when|how|why|update|free|milna)\b/i.test(text)) {
         questions.push(text);
       }
     } else if (b.isSelf === true) {
@@ -231,37 +292,46 @@ export function analyzeConversationStyle(bubbles: ChatBubble[]): {
 
     const words = text.toLowerCase().split(/\s+/);
     for (const w of words) {
-      const clean = w.replace(/[^a-zA-Z]/g, '');
+      const clean = w.replace(/[^a-zA-Z0-9]/g, '');
       if (!clean) continue;
       totalWords++;
-      if (HINGLISH_MARKERS.has(clean)) hinglishCount++;
+      if (COMPREHENSIVE_HINGLISH_WORDS.has(clean)) hinglishCount++;
       if (FORMAL_WORDS.has(clean)) formalCount++;
       if (CASUAL_WORDS.has(clean)) casualCount++;
-    }
+      if (SLANG_WORDS.has(clean)) slangCount++;
 
-    // Extract potential topic keywords (> 4 letters, capitalized or distinct)
-    const topicMatches = text.match(/\b([A-Z][a-z]{3,}|meet|project|plan|call|report|design|budget|party|flight)\b/g);
-    if (topicMatches) {
-      for (const tm of topicMatches) {
-        if (!topics.includes(tm.toLowerCase())) {
-          topics.push(tm.toLowerCase());
+      // Strict semantic topic matching (no common verbs or function words)
+      if (SEMANTIC_TOPIC_WHITELIST.has(clean)) {
+        if (!topics.includes(clean)) {
+          topics.push(clean);
         }
       }
     }
   }
 
-  const hinglishRatio = totalWords > 0 ? hinglishCount / totalWords : 0.3;
+  // Language Detection
   let languageStyle: 'hinglish' | 'english' | 'hindi' = 'english';
-  if (hinglishRatio > 0.15) {
+  const hinglishRatio = totalWords > 0 ? hinglishCount / totalWords : 0.4;
+
+  if (hasDevanagari) {
+    languageStyle = 'hindi';
+  } else if (hinglishCount >= 1 || slangCount >= 1 || hinglishRatio > 0.05) {
     languageStyle = 'hinglish';
   }
 
-  // Calculate Formality Score
-  let formalityLevel: 1 | 2 | 3 | 4 | 5 = 3;
-  if (formalCount > casualCount && formalCount >= 2) {
+  // Calculate Formality & Relationship Persona
+  let formalityLevel: 1 | 2 | 3 | 4 | 5 = 2;
+  let inferredPersona: PersonaType = 'Friend';
+
+  if (slangCount > 0 || hasLaughingEmoji || casualCount >= 3) {
+    formalityLevel = 1;
+    inferredPersona = 'Friend';
+  } else if (formalCount > casualCount && formalCount >= 2) {
     formalityLevel = formalCount >= 4 ? 5 : 4;
-  } else if (casualCount > formalCount || hinglishRatio > 0.4) {
-    formalityLevel = casualCount >= 3 ? 1 : 2;
+    inferredPersona = formalCount >= 4 ? 'Boss' : 'Client';
+  } else {
+    formalityLevel = 2;
+    inferredPersona = 'Friend';
   }
 
   let sentimentTone: 'casual' | 'formal' | 'respectful' | 'friendly' = 'friendly';
@@ -276,7 +346,8 @@ export function analyzeConversationStyle(bubbles: ChatBubble[]): {
     hinglishRatio: Math.round(hinglishRatio * 100) / 100,
     formalityLevel,
     sentimentTone,
-    recentTopics: topics.slice(-5),
+    inferredPersona,
+    recentTopics: topics.slice(-6),
     pendingQuestions: questions.slice(-3),
     lastIncomingMessage: lastIncoming,
     lastOutgoingMessage: lastOutgoing,
@@ -309,8 +380,8 @@ export async function getThreadContext(
     threadTitle: threadTitle || 'Contact',
     persona: inferred.persona,
     formalityLevel: inferred.formalityLevel,
-    languageStyle: inferred.formalityLevel >= 4 ? 'english' : 'hinglish',
-    hinglishRatio: inferred.formalityLevel >= 4 ? 0.05 : 0.4,
+    languageStyle: 'hinglish',
+    hinglishRatio: 0.5,
     sentimentTone: inferred.formalityLevel >= 4 ? 'respectful' : 'casual',
     recentTopics: [],
     pendingQuestions: [],
@@ -337,13 +408,20 @@ export async function updateContextFromBubbles(
   const existing = await getThreadContext(threadId, threadTitle);
   const analysis = analyzeConversationStyle(bubbles);
 
-  // If user explicitly configured persona (e.g. Boss), keep it; otherwise refine
+  // Dynamically adapt persona if observed messages show close friend/slang or boss/formal
+  let activePersona = existing.persona;
+  if (analysis.inferredPersona === 'Friend' && analysis.formalityLevel <= 2) {
+    activePersona = 'Friend';
+  } else if (analysis.inferredPersona === 'Boss' || analysis.inferredPersona === 'Client') {
+    activePersona = analysis.inferredPersona;
+  }
+
   const updatedProfile: ThreadContextProfile = {
     ...existing,
+    persona: activePersona,
     threadTitle: threadTitle || existing.threadTitle,
     languageStyle: analysis.languageStyle,
     hinglishRatio: analysis.hinglishRatio,
-    // Blend existing formality with observed style
     formalityLevel: analysis.formalityLevel,
     sentimentTone: analysis.sentimentTone,
     recentTopics: Array.from(new Set([...existing.recentTopics, ...analysis.recentTopics])).slice(-8),

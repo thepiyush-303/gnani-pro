@@ -54,6 +54,7 @@ import {
   generateContextualIcebreakers,
   generateSmartReplies,
   improveMessageWithContext,
+  ImproveMessageResult,
 } from '../src/services/contextIntelligenceEngine';
 
 // ─────────────────────────────────────────────
@@ -178,6 +179,7 @@ export default function DashboardScreen() {
   const [testToneResult, setTestToneResult] = useState<ToneSensitivityResult | null>(null);
   const [testFactResult, setTestFactResult] = useState<FactCheckResult | null>(null);
   const [testIceResult, setTestIceResult] = useState<IcebreakerResult | null>(null);
+  const [testImproveResult, setTestImproveResult] = useState<ImproveMessageResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   // Load initial global persona
@@ -236,10 +238,11 @@ export default function DashboardScreen() {
               );
               if (replies.suggestions.length > 0) {
                 setLiveSmartReplies(replies.suggestions);
+                const firstName = (profile.threadTitle || 'Contact').split(' ')[0] || profile.threadTitle;
                 const sub = `${profile.persona} (${profile.languageStyle === 'hinglish' ? 'Hinglish' : 'English'})`;
                 setLiveSmartReplySubtitle(sub);
                 await IndicContext.showSmartReplies(
-                  `💡 Reply to ${profile.threadTitle}`,
+                  `💡 Reply to ${firstName}`,
                   sub,
                   replies.suggestions,
                 );
@@ -306,41 +309,44 @@ export default function DashboardScreen() {
         const rawDraft = event.draftText || (await IndicContext.readInputFieldText()) || '';
 
         if (event.action === 'improve') {
-          // Check if user drafted anything
-          if (!rawDraft.trim()) {
-            Alert.alert(
-              '✏️ No Message Drafted',
-              'Please type your draft message in the WhatsApp input bar first, then tap ✨ Improve to enhance it.',
+          const draftToImprove = rawDraft.trim() || testDraft.trim();
+          const firstName = (profile.threadTitle || 'Contact').split(' ')[0] || profile.threadTitle;
+
+          if (!draftToImprove) {
+            await IndicContext.showSmartReplies(
+              '✏️ Draft Required',
+              'Type a message in WhatsApp input bar first',
+              [
+                'Haan bhai, bol kya scene hai?',
+                'Sun, ek baat batani thi',
+                'Kal milte hain aaram se',
+              ],
             );
             return;
           }
 
           // Context-aware improvement considering relationship persona and conversational style
           const improved = await improveMessageWithContext(
-            rawDraft,
+            draftToImprove,
             profile,
             globalIntent,
             buffer,
           );
 
-          Alert.alert(
-            '✨ Replace Message?',
-            `Original:\n"${rawDraft}"\n\nImproved (${profile.persona} • ${profile.formalityLevel >= 4 ? 'Formal' : 'Casual'}):\n"${improved.improvedDraft}"\n\n${improved.explanation}`,
-            [
-              { text: 'Keep Original', style: 'cancel' },
-              {
-                text: 'Replace in Chat',
-                style: 'default',
-                onPress: async () => {
-                  try {
-                    await IndicContext.injectText(improved.improvedDraft);
-                  } catch (e: any) {
-                    Alert.alert('Injection Failed', e?.message || 'Could not replace text in WhatsApp.');
-                  }
-                },
-              },
-            ],
+          const suggestions = [
+            improved.improvedDraft,
+            ...improved.alternativeDrafts,
+          ].filter(Boolean);
+
+          // Show floating recommendation chips directly on top of WhatsApp!
+          await IndicContext.showSmartReplies(
+            `✨ Improved for ${firstName} (${profile.persona})`,
+            `Tap any option to replace in WhatsApp`,
+            suggestions,
           );
+
+          setLiveSmartReplies(suggestions);
+          setLiveSmartReplySubtitle(`✨ Improved: "${draftToImprove.slice(0, 25)}..."`);
         } else if (event.action === 'factcheck') {
           if (!rawDraft.trim()) {
             Alert.alert('🔍 Fact Check', 'Please draft a message in the input field first.');
@@ -377,24 +383,12 @@ export default function DashboardScreen() {
           if (iceResult.suggestions.length > 0) {
             setLiveIcebreakers(iceResult.suggestions);
 
+            const firstName = (profile.threadTitle || 'Contact').split(' ')[0] || profile.threadTitle;
             // Show overlay recommendation card directly on WhatsApp
-            IndicContext.showSmartReplies(
-              `🧊 Icebreakers for ${profile.threadTitle}`,
+            await IndicContext.showSmartReplies(
+              `🧊 Icebreakers for ${firstName}`,
               `Tailored for ${profile.persona} (${profile.languageStyle})`,
               iceResult.suggestions,
-            ).catch(() => {});
-
-            // Also show dialog in case user is viewing from dashboard
-            Alert.alert(
-              `🧊 Icebreakers for ${profile.threadTitle} (${profile.persona})`,
-              'Select an opener to inject into chat:',
-              [
-                ...iceResult.suggestions.map((s, idx) => ({
-                  text: `${idx + 1}. ${s}`,
-                  onPress: () => IndicContext.injectText(s).catch(() => {}),
-                })),
-                { text: 'Cancel', style: 'cancel' },
-              ],
             );
           }
         }
@@ -565,16 +559,50 @@ export default function DashboardScreen() {
   const runTestIcebreaker = useCallback(async () => {
     setIsAnalyzing(true);
     try {
-      const res = await generateIcebreakers(currentBuffer, activeListener || undefined, globalPersona || undefined);
+      const threadInfo = await IndicContext.getActiveThread();
+      const threadId = threadInfo?.threadId || activeThreadId || 'default_thread';
+      const threadTitle = threadInfo?.threadTitle || activeThreadTitle || 'Contact';
+      const profile = activeProfile || (await getThreadContext(threadId, threadTitle));
+      const globalIntent = await getGlobalUserIntent();
+      const buffer = currentBuffer.length > 0 ? currentBuffer : ((await IndicContext.getSessionBuffer()) as ChatBubble[]);
+
+      const res = await generateContextualIcebreakers(buffer, profile, globalIntent);
       setTestIceResult(res);
       setTestToneResult(null);
       setTestFactResult(null);
+      setTestImproveResult(null);
     } catch (e: any) {
       Alert.alert('Icebreaker Error', e?.message || 'Failed to generate icebreakers.');
     } finally {
       setIsAnalyzing(false);
     }
-  }, [currentBuffer, activeListener, globalPersona]);
+  }, [activeThreadId, activeThreadTitle, activeProfile, currentBuffer]);
+
+  const runTestImprove = useCallback(async () => {
+    if (!testDraft.trim()) {
+      Alert.alert('Empty Draft', 'Please enter a test draft message to improve.');
+      return;
+    }
+    setIsAnalyzing(true);
+    try {
+      const threadInfo = await IndicContext.getActiveThread();
+      const threadId = threadInfo?.threadId || activeThreadId || 'default_thread';
+      const threadTitle = threadInfo?.threadTitle || activeThreadTitle || 'Contact';
+      const profile = activeProfile || (await getThreadContext(threadId, threadTitle));
+      const globalIntent = await getGlobalUserIntent();
+      const buffer = currentBuffer.length > 0 ? currentBuffer : ((await IndicContext.getSessionBuffer()) as ChatBubble[]);
+
+      const res = await improveMessageWithContext(testDraft, profile, globalIntent, buffer);
+      setTestImproveResult(res);
+      setTestToneResult(null);
+      setTestFactResult(null);
+      setTestIceResult(null);
+    } catch (e: any) {
+      Alert.alert('Improve Error', e?.message || 'Failed to improve draft.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, [testDraft, activeThreadId, activeThreadTitle, activeProfile, currentBuffer]);
 
   // ── Live Smart Replies & Icebreaker Actions ──
   const handleGenerateLiveIcebreakers = useCallback(async () => {
@@ -591,11 +619,12 @@ export default function DashboardScreen() {
       setLiveIcebreakers(iceResult.suggestions);
 
       if (iceResult.suggestions.length > 0) {
-        IndicContext.showSmartReplies(
-          `🧊 Icebreakers for ${profile.threadTitle}`,
+        const firstName = (profile.threadTitle || 'Contact').split(' ')[0] || profile.threadTitle;
+        await IndicContext.showSmartReplies(
+          `🧊 Icebreakers for ${firstName}`,
           `Tailored for ${profile.persona} (${profile.languageStyle})`,
           iceResult.suggestions,
-        ).catch(() => {});
+        );
       }
     } catch (e: any) {
       Alert.alert('Icebreaker Error', e?.message || 'Failed to generate icebreakers.');
@@ -973,6 +1002,13 @@ export default function DashboardScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.testActionBtn}
+            onPress={runTestImprove}
+            disabled={isAnalyzing}
+          >
+            <Text style={styles.testActionText}>✨ Improve</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.testActionBtn}
             onPress={runTestFactCheck}
             disabled={isAnalyzing}
           >
@@ -1051,6 +1087,26 @@ export default function DashboardScreen() {
                 }}
               >
                 <Text style={styles.icePillText}>{i + 1}. {s}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* Improve Result Box */}
+        {testImproveResult && (
+          <View style={[styles.testResultCard, styles.testResultCardSuccess]}>
+            <Text style={styles.resultTitle}>✨ Context-Aware Improvements</Text>
+            <Text style={styles.resultSub}>{testImproveResult.explanation}</Text>
+            {[testImproveResult.improvedDraft, ...testImproveResult.alternativeDrafts].map((s, i) => (
+              <TouchableOpacity
+                key={i}
+                style={styles.icePill}
+                onPress={() => {
+                  Clipboard.setString(s);
+                  Alert.alert('Copied', `"${s}" copied to clipboard!`);
+                }}
+              >
+                <Text style={styles.icePillText}>{i === 0 ? '★ Primary: ' : '• Option: '}{s}</Text>
               </TouchableOpacity>
             ))}
           </View>

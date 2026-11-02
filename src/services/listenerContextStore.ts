@@ -31,6 +31,10 @@ const CLIENT_KEYWORDS = [
   'client', 'customer', 'vendor', 'partner', 'consultant', 'account',
 ];
 
+const WORK_KEYWORDS = [
+  'team', 'office', 'project', 'lead', 'manager', 'colleague', 'corp', 'work', 'hr', 'dept',
+];
+
 const FRIEND_KEYWORDS = [
   'bro', 'bhai', 'yaar', 'dude', 'sis', 'dost', 'buddy', 'bestie', 'gang', 'homie',
 ];
@@ -57,13 +61,18 @@ export function inferPersonaFromTitle(title: string): {
     return { persona: 'Client', formalityLevel: 4, honorificRequired: true };
   }
 
+  // Check explicit Work/Colleague keywords
+  if (WORK_KEYWORDS.some((kw) => lower.includes(kw))) {
+    return { persona: 'Colleague', formalityLevel: 3, honorificRequired: false };
+  }
+
   // Check Friend keywords
   if (FRIEND_KEYWORDS.some((kw) => lower.includes(kw))) {
     return { persona: 'Friend', formalityLevel: 1, honorificRequired: false };
   }
 
-  // Default neutral / colleague
-  return { persona: 'Colleague', formalityLevel: 3, honorificRequired: false };
+  // Default for WhatsApp personal contacts is Friend/Peer (formality 2)
+  return { persona: 'Friend', formalityLevel: 2, honorificRequired: false };
 }
 
 // ─── Persistent Storage Helpers ─────────────────────────────────────────────

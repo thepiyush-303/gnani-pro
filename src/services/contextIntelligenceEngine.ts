@@ -2,11 +2,12 @@
  * IndicContext Assistant — Context Intelligence & Recommendation Engine
  *
  * Generates dynamic, style-consistent Smart Replies, Contextual Icebreakers,
- * and Context-Aware Message Improvements. NEVER uses static hardcoded templates.
+ * and Context-Aware Message Improvements.
+ * Fully contextual across all tones: Slang/Bro, Friendly, Polite, Respectful, and Formal.
  */
 
 import { ChatBubble, IcebreakerResult, SmartReplyResult, ThreadContextProfile } from '../types/context';
-import { GlobalUserIntent } from './conversationContextDb';
+import { COMPREHENSIVE_HINGLISH_WORDS, GlobalUserIntent, getCleanFirstName, SLANG_WORDS } from './conversationContextDb';
 import { sanitizeBubbles, sanitizeText } from '../utils/sanitizer';
 
 // ─── Gnani Evon LLM Integration ─────────────────────────────────────────────
@@ -64,6 +65,141 @@ async function queryEvonLlm(
   throw new Error('LLM Gateway Unreachable');
 }
 
+// ─── Conversational Language & Intent Understanding ─────────────────────────
+
+export function detectConversationLanguage(
+  incomingMsg: string,
+  profile: ThreadContextProfile,
+  bubbles: ChatBubble[] = [],
+): 'hinglish' | 'hindi' | 'english' {
+  const allTexts = [incomingMsg, ...bubbles.map((b) => b.text)].join(' ');
+
+  // Devanagari script detection
+  if (/[\u0900-\u097F]/.test(allTexts)) {
+    return 'hindi';
+  }
+
+  // Count Hinglish / Slang vocabulary tokens across entire conversational context
+  let hinglishCount = 0;
+  const words = allTexts.toLowerCase().split(/\s+/);
+  for (const w of words) {
+    const clean = w.replace(/[^a-zA-Z0-9]/g, '');
+    if (COMPREHENSIVE_HINGLISH_WORDS.has(clean) || SLANG_WORDS.has(clean)) {
+      hinglishCount++;
+    }
+  }
+
+  // Also check incoming message specifically
+  const incomingWords = incomingMsg.toLowerCase().split(/\s+/);
+  for (const w of incomingWords) {
+    const clean = w.replace(/[^a-zA-Z0-9]/g, '');
+    if (COMPREHENSIVE_HINGLISH_WORDS.has(clean) || SLANG_WORDS.has(clean)) {
+      return 'hinglish';
+    }
+  }
+
+  if (hinglishCount >= 1 || profile.languageStyle === 'hinglish') {
+    return 'hinglish';
+  }
+
+  return 'english';
+}
+
+export type ConversationTheme =
+  | 'DRAMA_REACTION'
+  | 'GAMING'
+  | 'COLLEGE_SUBMISSION'
+  | 'TRAVEL_COMMUTE'
+  | 'ROASTING_BANTER'
+  | 'MEET_PLAN'
+  | 'STATUS_UPDATE'
+  | 'ACK_RECEIVED'
+  | 'FEEDBACK_OPINION'
+  | 'AVAILABILITY_CALL'
+  | 'CASUAL_CHAT';
+
+export interface ConversationContextDetails {
+  theme: ConversationTheme;
+  topic: string;
+  isQuestion: boolean;
+  isSlang: boolean;
+  formality: 1 | 2 | 3 | 4 | 5;
+  language: 'hinglish' | 'hindi' | 'english';
+  firstName: string;
+}
+
+export function extractConversationDetails(
+  incomingMsg: string,
+  profile: ThreadContextProfile,
+  bubbles: ChatBubble[] = [],
+): ConversationContextDetails {
+  const lowerMsg = incomingMsg.toLowerCase();
+  const allHistory = bubbles.map((b) => b.text).join(' ').toLowerCase();
+  const combined = `${lowerMsg} ${allHistory}`;
+  const language = detectConversationLanguage(incomingMsg, profile, bubbles);
+  const firstName = getCleanFirstName(profile.threadTitle);
+
+  // Check if slang / bro banter is present
+  const isSlang =
+    /\b(bhnchoo|bc|mc|lode|chutiya|baap|deadshot|chid|bhadak|react|reaction|kalesh|lafda|merko|merse|muje)\b/i.test(
+      combined,
+    ) || /[😂🤣]/.test(combined);
+
+  // 1. Topic Extraction
+  let topic = '';
+  if (/\b(deadshot|pubg|bgmi|game)\b/i.test(combined)) topic = 'deadshot';
+  else if (/\b(exp3|pdf|submission|assignment|lab)\b/i.test(combined)) topic = 'submission';
+  else if (/\b(tannu|group|reaction|emoji|qr)\b/i.test(combined)) topic = 'group drama';
+  else if (/\b(train|station|metro)\b/i.test(combined)) topic = 'train';
+  else if (/\b(cafe|coffee|dinner|lunch|food)\b/i.test(combined)) topic = 'cafe';
+  else if (/\b(project|report|code|design)\b/i.test(combined)) topic = 'project';
+
+  // 2. Theme & Intent Classification
+  let theme: ConversationTheme = 'CASUAL_CHAT';
+
+  if (
+    /\b(chid|chidna|bhadak|react|reaction|hta liya|laughing|emoji|qr|group pe|convo|serious convo|lafda|kalesh|natak|overacting)\b/i.test(
+      lowerMsg,
+    ) ||
+    (/\b(chid|react|reaction|emoji)\b/i.test(allHistory) && /\b(bhnchoo|bc|lode|kha|dekha|usne)\b/i.test(lowerMsg))
+  ) {
+    theme = 'DRAMA_REACTION';
+  } else if (/\b(deadshot|khelenge|game|match|online aaja|bgmi|pubg|cod|squad)\b/i.test(lowerMsg) || (/\b(deadshot|game)\b/i.test(allHistory) && /\b(done|raat|khel|aaja)\b/i.test(lowerMsg))) {
+    theme = 'GAMING';
+  } else if (
+    /\b(submit|exp3|pdf|assignment|lab|attendance|marks|exam|test)\b/i.test(lowerMsg) ||
+    (/\.pdf\b/i.test(lowerMsg) && /\b(submit|kr diya)\b/i.test(lowerMsg))
+  ) {
+    theme = 'COLLEGE_SUBMISSION';
+  } else if (/\b(train|ghar pauch|rukne wali|network ni aare|station|traffic|signal|paucha|pauch)\b/i.test(lowerMsg)) {
+    theme = 'TRAVEL_COMMUTE';
+  } else if (/\b(baap ko kitna dhyan|baap|lode ne|bhnchoo|chutiya)\b/i.test(lowerMsg)) {
+    theme = 'ROASTING_BANTER';
+  } else if (/\b(milte|milna|milenge|plan|cafe|dinner|lunch|party|chalna|baje|venue)\b/i.test(lowerMsg)) {
+    theme = 'MEET_PLAN';
+  } else if (/\b(kab tak|status|update|ready|complete|kahan tak pahuncha|hua kya|bheja kya|bhejoge|progress)\b/i.test(lowerMsg)) {
+    theme = 'STATUS_UPDATE';
+  } else if (/\b(bhej diya|send kar diya|sent|shared|link|check kar|dekh le|attached|forwarded)\b/i.test(lowerMsg)) {
+    theme = 'ACK_RECEIVED';
+  } else if (/\b(kaisa laga|kaisa hai|theek hai na|kya lagta hai|how is|review|feedback)\b/i.test(lowerMsg)) {
+    theme = 'FEEDBACK_OPINION';
+  } else if (/\b(free ho|call karu|baat kare|call pe|available|call kar|free hai)\b/i.test(lowerMsg)) {
+    theme = 'AVAILABILITY_CALL';
+  }
+
+  const isQuestion = lowerMsg.includes('?') || /\b(kya|kab|kahan|kidhar|kaisa|kaise|kitna|when|where|how|why)\b/i.test(lowerMsg);
+
+  return {
+    theme,
+    topic,
+    isQuestion,
+    isSlang,
+    formality: isSlang ? 1 : profile.formalityLevel,
+    language,
+    firstName,
+  };
+}
+
 // ─── 1. Smart Reply Recommendations ─────────────────────────────────────────
 
 export async function generateSmartReplies(
@@ -77,19 +213,19 @@ export async function generateSmartReplies(
     .map((b) => `${b.isSelf ? 'You' : profile.threadTitle}: ${b.text}`)
     .join('\n');
 
-  const persona = profile.persona;
-  const formality = profile.formalityLevel;
-  const langStyle = profile.languageStyle;
+  const detectedLang = detectConversationLanguage(incomingMessage, profile, bubbles);
+  const details = extractConversationDetails(incomingMessage, profile, bubbles);
 
-  const systemPrompt = `You are an AI assistant generating 3 contextual quick-replies for WhatsApp.
-Recipient: ${profile.threadTitle}
-Relationship Persona: ${persona} (Formality level: ${formality}/5)
-Language: ${langStyle === 'hinglish' ? 'Conversational Indian Hinglish' : 'Natural English'}
-Style Guidelines:
-- If persona is Friend: casual, informal, friendly Indian phrasing (bhai, yaar, haan, theek hai).
-- If persona is Boss/Client: strictly polite, concise, professional, honorifics (Sir/Ma'am).
-- If persona is Elder: respectful Hindi/Hinglish (Aap, Namaste, Kripya).
-- Do NOT use robotic or boilerplate language.
+  const systemPrompt = `You are an AI assistant generating 3 conversational quick-replies for WhatsApp.
+Recipient: ${profile.threadTitle} (Relationship: ${profile.persona}, Formality: ${details.formality}/5)
+Tone: ${details.isSlang ? 'Casual Indian Slang / College Buddy banter' : 'Natural conversational Hinglish'}
+Language: ${detectedLang === 'hinglish' ? 'Conversational Indian Hinglish' : 'Natural English'}
+
+Context Guidelines:
+- Directly reply to what the other person actually said.
+- If they are discussing a group incident, laughing emoji, or drama: reply directly about that drama with matching buddy tone.
+- If they are talking about gaming, submissions, or plans: address that specifically.
+- Never use generic placeholder greetings like "sab mast bhai" unless it's a bare greeting.
 Respond ONLY in valid JSON:
 {
   "suggestions": ["Option 1", "Option 2", "Option 3"],
@@ -102,7 +238,7 @@ Respond ONLY in valid JSON:
         { role: 'system', content: systemPrompt },
         {
           role: 'user',
-          content: `Recent Chat:\n${recentHistory}\n\nLast Incoming Message from ${profile.threadTitle}:\n"${sanitizedMsg}"`,
+          content: `Recent Chat History:\n${recentHistory}\n\nLast Incoming Message:\n"${sanitizedMsg}"`,
         },
       ],
       0.6,
@@ -113,117 +249,206 @@ Respond ONLY in valid JSON:
     if (Array.isArray(parsed.suggestions) && parsed.suggestions.length > 0) {
       return {
         suggestions: parsed.suggestions.slice(0, 3),
-        reason: parsed.reason || `Tailored for ${persona}`,
+        reason: parsed.reason || `Tailored for ${profile.persona} (${detectedLang})`,
         detectedTone: profile.sentimentTone,
-        languageUsed: langStyle,
+        languageUsed: detectedLang,
       };
     }
   } catch {
-    // Proceed to contextual heuristic engine
+    // Proceed to high-fidelity contextual heuristic engine
   }
 
-  // ── Dynamic Contextual Heuristic Engine (Offline / High-Fidelity) ──
-  return generateContextualRepliesLocally(incomingMessage, profile);
+  return generateContextualRepliesLocally(incomingMessage, profile, bubbles);
 }
 
-function generateContextualRepliesLocally(
+export function generateContextualRepliesLocally(
   msg: string,
   profile: ThreadContextProfile,
+  bubbles: ChatBubble[] = [],
 ): SmartReplyResult {
-  const lower = msg.toLowerCase();
-  const isFriend = profile.persona === 'Friend' || profile.formalityLevel <= 2;
-  const isBossOrClient = profile.persona === 'Boss' || profile.persona === 'Client' || profile.formalityLevel >= 4;
+  const details = extractConversationDetails(msg, profile, bubbles);
+  const isSlang = details.isSlang || details.formality === 1;
+  const isFriend = details.formality <= 2 || profile.persona === 'Friend';
+  const isBossOrClient = details.formality >= 4 || profile.persona === 'Boss' || profile.persona === 'Client';
   const isElder = profile.persona === 'Elder';
-  const isHinglish = profile.languageStyle === 'hinglish';
 
   const suggestions: string[] = [];
 
-  // Question: Time / When / Status
-  if (lower.includes('kab') || lower.includes('when') || lower.includes('status') || lower.includes('update') || lower.includes('kaha')) {
-    if (isBossOrClient) {
-      suggestions.push('Working on it, will share the update shortly Sir.');
-      suggestions.push('Almost finalized, sending it across by 4 PM.');
-      suggestions.push('Reviewing the final items right now, will update in 30 mins.');
-    } else if (isElder) {
-      suggestions.push('Bas thodi der me bhejta hu, pranam.');
-      suggestions.push('Haanji, kaam chal raha hai uspe, jald hi update karta hu.');
-      suggestions.push('Thoda sa time lagega, free hoke call karta hu aapko.');
-    } else if (isHinglish || isFriend) {
-      suggestions.push('Bas 10 min me bhej raha hu bhai.');
-      suggestions.push('Review kar raha hu, shaam tak pakka sorted.');
-      suggestions.push('Abhi thoda busy hu yaar, 1 ghante me batata hu.');
+  // ── 1. DRAMA_REACTION (e.g. Tannu chid gyi, reaction hta liya, emoji, group) ──
+  if (details.theme === 'DRAMA_REACTION') {
+    if (isSlang || isFriend) {
+      suggestions.push(`Wahi to bc, maine to bas mazaak me react kiya tha pata nahi kyu bhadak gayi 😂`);
+      suggestions.push(`Bhai group pe alag hi nautanki chal rahi hai sabki, chhod na lite le`);
+      suggestions.push(`Maine to reaction hata bhi liya tha turant, fir bhi itna mudda bana diya 😂`);
     } else {
-      suggestions.push('Working on it now, will share in a few minutes.');
-      suggestions.push('Almost done, will send it across shortly.');
-      suggestions.push('Just stepping in, let me get back to you in 15 mins.');
+      suggestions.push(`Haan maine dekha, thoda misunderstanding ho gaya lagta hai.`);
+      suggestions.push(`Koi baat nahi, normal clarification de denge.`);
+      suggestions.push(`Reaction to hata diya tha, tension mat lo.`);
     }
   }
-  // Question: Meeting / Plan / Availability
-  else if (lower.includes('plan') || lower.includes('milna') || lower.includes('free') || lower.includes('call') || lower.includes('time')) {
-    if (isBossOrClient) {
-      suggestions.push('Yes Sir, available for a quick sync whenever convenient.');
-      suggestions.push('Could we connect post 3 PM today?');
-      suggestions.push('Sharing my availability for the sync shortly.');
-    } else if (isElder) {
-      suggestions.push('Ji bilkul, aap batayein kis time call karu.');
-      suggestions.push('Haanji, shaam ko aapse baat karta hu.');
-      suggestions.push('Aap jab free ho batana, pranam.');
-    } else if (isHinglish || isFriend) {
-      suggestions.push('Haan bhai! Shaam ko milte hain 6 baje.');
-      suggestions.push('Abhi thoda fasa hu, thodi der me call karta hu.');
-      suggestions.push('Scene sorted hai, bata kab chalna hai.');
+
+  // ── 2. GAMING (e.g. deadshot, khelenge, game, match) ──
+  else if (details.theme === 'GAMING') {
+    if (isSlang || isFriend) {
+      suggestions.push(`Haan raat ko pakka aate hain deadshot pe, 10 baje tak online aa jaiyo!`);
+      suggestions.push(`Done hai bhai, khana khake seedha squad baithate hain.`);
+      suggestions.push(`Sahi hai bhai, raat ko maze karte hain deadshot pe.`);
     } else {
-      suggestions.push('Yes, free for a call in about 20 minutes.');
-      suggestions.push('Sounds good! Let me know what time works best.');
-      suggestions.push('A bit occupied right now, let\'s connect this evening.');
+      suggestions.push(`Sounds good! Let's connect for the game later tonight.`);
+      suggestions.push(`Done! Let me know once you log in.`);
+      suggestions.push(`Count me in for tonight!`);
     }
   }
-  // Confirmation / Done / Thanks
-  else if (lower.includes('thanks') || lower.includes('thank') || lower.includes('dhanyawad') || lower.includes('shukriya') || lower.includes('done')) {
-    if (isBossOrClient) {
-      suggestions.push('Most welcome Sir, glad to support.');
-      suggestions.push('You\'re welcome. Let me know if anything else is needed.');
-      suggestions.push('Acknowledged with thanks.');
-    } else if (isElder) {
-      suggestions.push('Ji dhanyawad, pranam.');
-      suggestions.push('Aapka aashirwad hai ji.');
-      suggestions.push('Most welcome ji, khyal rakhiyega.');
-    } else if (isHinglish || isFriend) {
-      suggestions.push('Arre anytime bhai!');
-      suggestions.push('No scene yaar, chill kar.');
-      suggestions.push('Mast! Aur bata kya chal raha hai.');
+
+  // ── 3. COLLEGE_SUBMISSION (e.g. exp3, pdf, submit) ──
+  else if (details.theme === 'COLLEGE_SUBMISSION') {
+    if (isSlang || isFriend) {
+      suggestions.push(`Ha bhai kr diya tha ye to, tension mat le.`);
+      suggestions.push(`Haan ye wala submit ho gaya hai, agla wala dekhna hai ab.`);
+      suggestions.push(`Dekh liya tha maine, submission sorted hai apna.`);
     } else {
-      suggestions.push('You\'re very welcome!');
-      suggestions.push('Happy to help anytime.');
-      suggestions.push('Great, talk soon!');
+      suggestions.push(`Yes, this submission has been completed.`);
+      suggestions.push(`Checked and submitted, thank you for sharing.`);
+      suggestions.push(`Acknowledged, moving on to the next assignment.`);
     }
   }
-  // General / Casual Chat
+
+  // ── 4. TRAVEL_COMMUTE (e.g. train, ghar pauch, network ni aare) ──
+  else if (details.theme === 'TRAVEL_COMMUTE') {
+    if (isSlang || isFriend) {
+      suggestions.push(`Haan ghar pahunch ke message kariyo aaram se.`);
+      suggestions.push(`Network chala gaya tha lagta hai tera, safe pahunch ja pehle.`);
+      suggestions.push(`Bas 10 minute me ghar pahunch ke batata hu bhai.`);
+    } else {
+      suggestions.push(`Please reach safely and update once home.`);
+      suggestions.push(`Network issues noticed, talk soon once you arrive.`);
+      suggestions.push(`Will update once I reach the destination.`);
+    }
+  }
+
+  // ── 5. ROASTING_BANTER (e.g. baap ko kitna dhyan rhta h) ──
+  else if (details.theme === 'ROASTING_BANTER') {
+    suggestions.push(`Abe chal na bada aaya baap banne 😂`);
+    suggestions.push(`Haha shukriya baap ji, ahsaan mand hu tera 😂`);
+    suggestions.push(`Itna dhyan to khud ka nahi rakhta tu jitna mera rakh raha hai 😂`);
+  }
+
+  // ── 6. MEET_PLAN (e.g. cafe, dinner, milte hain) ──
+  else if (details.theme === 'MEET_PLAN') {
+    const spot = details.topic ? details.topic : 'cafe';
+    if (isSlang || isFriend) {
+      suggestions.push(`Haan bilkul bhai! Shaam ko ${spot} pe milte hain, kitne baje chalna hai?`);
+      suggestions.push(`Haan chalega! 6:30 ya 7 baje tak ${spot} pahunchte hain.`);
+      suggestions.push(`Plan sahi hai bhai, exact time bata nikalta hu.`);
+    } else if (isBossOrClient) {
+      suggestions.push(`Ji Sir, available for the meeting. Please confirm the suitable time.`);
+      suggestions.push(`Post 3 PM works best for the discussion Sir.`);
+      suggestions.push(`Noted Sir, sharing my schedule shortly.`);
+    } else if (isElder) {
+      suggestions.push(`Ji bilkul, shaam ko milte hain. Aap samay bata dijiye, pranam.`);
+      suggestions.push(`Haanji main us samay tak aa jaunga ji.`);
+      suggestions.push(`Ji theek hai, aapke hisaab se plan finalize karte hain.`);
+    } else {
+      suggestions.push(`Sounds like a plan! Let me know what time works best.`);
+      suggestions.push(`Count me in, see you there!`);
+      suggestions.push(`Awesome, let's catch up then!`);
+    }
+  }
+
+  // ── 7. STATUS_UPDATE (e.g. kab tak bhejoge file) ──
+  else if (details.theme === 'STATUS_UPDATE') {
+    if (isSlang || isFriend) {
+      suggestions.push(`Bas 10-15 minute me bhej raha hu bhai, almost ready hai.`);
+      suggestions.push(`Review kar raha hu, shaam tak pakka send karta hu.`);
+      suggestions.push(`Kaam chal raha hai uspe, free hote hi forward karta hu.`);
+    } else if (isBossOrClient) {
+      suggestions.push(`Working on it right now Sir, will share the update in 30 minutes.`);
+      suggestions.push(`Almost finalized Sir, sending it across shortly for your review.`);
+      suggestions.push(`Reviewing the deliverables Sir, will update you by 4 PM.`);
+    } else {
+      suggestions.push(`Bas thodi der me bhejta hu ji, kaam lagbhag complete hai.`);
+      suggestions.push(`Ji kaam chal raha hai uspe, jald hi update karta hu.`);
+      suggestions.push(`Thoda sa time lagega, free hoke forward karta hu.`);
+    }
+  }
+
+  // ── 8. ACK_RECEIVED (e.g. bhej diya check kar lo) ──
+  else if (details.theme === 'ACK_RECEIVED') {
+    if (isSlang || isFriend) {
+      suggestions.push(`Haan mil gaya bhai, check karke thodi der me batata hu.`);
+      suggestions.push(`Sahi hai! Ek baar dekh leta hu fir call karta hu.`);
+      suggestions.push(`Thanks bhai! Abhi open karke dekh raha hu.`);
+    } else if (isBossOrClient) {
+      suggestions.push(`Received with thanks Sir. Reviewing it now and will revert shortly.`);
+      suggestions.push(`Acknowledged Sir. I will go through the details and share feedback.`);
+      suggestions.push(`Thank you Sir, will follow up promptly.`);
+    } else {
+      suggestions.push(`Ji mil gaya, dhanyawad. Dekh kar batata hu aapko.`);
+      suggestions.push(`Prapt ho gaya ji, aabhar.`);
+      suggestions.push(`Ji samajh gaya, dhanyawad.`);
+    }
+  }
+
+  // ── 9. FEEDBACK_OPINION (e.g. kaisa laga design) ──
+  else if (details.theme === 'FEEDBACK_OPINION') {
+    if (isSlang || isFriend) {
+      suggestions.push(`Kafi sahi lag raha hai bhai, overall ekdum mast hai!`);
+      suggestions.push(`Accha laga yaar, bas 1-2 chhote points the jo discuss karne hain.`);
+      suggestions.push(`Thoda busy tha, abhi dhyan se dekh ke detail me batata hu.`);
+    } else if (isBossOrClient) {
+      suggestions.push(`Looks very promising Sir, structuring kafi clean aur solid hai.`);
+      suggestions.push(`Overall review positive hai Sir, have noted minor refinements.`);
+      suggestions.push(`Reviewing in detail Sir, structured feedback jald share karta hu.`);
+    } else {
+      suggestions.push(`Kafi accha laga ji, bahut sundar hai.`);
+      suggestions.push(`Ji dekh liya, bahut badhiya prayas hai.`);
+      suggestions.push(`Thoda dekh kar vistaar se batata hu ji.`);
+    }
+  }
+
+  // ── 10. AVAILABILITY_CALL (e.g. free ho kya) ──
+  else if (details.theme === 'AVAILABILITY_CALL') {
+    if (isSlang || isFriend) {
+      suggestions.push(`Haan bilkul free hu bhai, call kar le abhi.`);
+      suggestions.push(`Thoda sa fasa hu yaar, 10-15 minute me call back karta hu.`);
+      suggestions.push(`Abhi ek meeting me hu, shaam ko aaram se baat karte hain.`);
+    } else if (isBossOrClient) {
+      suggestions.push(`Ji Sir, bilkul free hu, aap call kar sakte hain.`);
+      suggestions.push(`Currently in a quick meeting Sir, will call you back in 15 mins.`);
+      suggestions.push(`Could we connect post 4 PM today Sir?`);
+    } else {
+      suggestions.push(`Ji bilkul, aap kripya call kar lijiye.`);
+      suggestions.push(`Bas thodi der me call karta hu ji, pranam.`);
+      suggestions.push(`Aap jab chahein call kar sakte hain ji.`);
+    }
+  }
+
+  // ── 11. CASUAL_CHAT / FALLBACK ──
   else {
-    if (isBossOrClient) {
-      suggestions.push('Understood Sir, noted and proceeding accordingly.');
-      suggestions.push('Thank you for the update. Will follow up promptly.');
-      suggestions.push('Received, will review and get back to you.');
+    if (isSlang || isFriend) {
+      suggestions.push(`Wahi to bhai, alag hi scene chal raha hai 😂`);
+      suggestions.push(`Haan bhai samjha, sahi hai!`);
+      suggestions.push(`Chal theek hai, thodi der me connect karte hain.`);
+    } else if (isBossOrClient) {
+      suggestions.push(`Understood Sir, noted and proceeding accordingly.`);
+      suggestions.push(`Thank you for the update Sir, will follow up promptly.`);
+      suggestions.push(`Received Sir, will keep you posted.`);
     } else if (isElder) {
-      suggestions.push('Ji theek hai, pranam.');
-      suggestions.push('Aap kaise ho ji? Sab theek wahan?');
-      suggestions.push('Haanji samajh gaya, dhanyawad.');
-    } else if (isHinglish || isFriend) {
-      suggestions.push('Theek hai bhai, samjha.');
-      suggestions.push('Arre sahi hai! Kal milte hain.');
-      suggestions.push('Haan pakka, update karta hu thodi der me.');
+      suggestions.push(`Pranam ji, sab badhiya hai. Aap sunaiye kaisa chal raha hai?`);
+      suggestions.push(`Aapka aashirwad hai ji, sab kushal mangal hai.`);
+      suggestions.push(`Ji theek hai, dhanyawad pranam.`);
     } else {
-      suggestions.push('Sounds great, thanks for letting me know.');
-      suggestions.push('Got it, will keep you posted!');
-      suggestions.push('Perfect, let\'s catch up soon.');
+      suggestions.push(`Sounds good! Talk to you shortly.`);
+      suggestions.push(`Got it, thanks for letting me know!`);
+      suggestions.push(`All good here, catch up soon!`);
     }
   }
 
   return {
     suggestions: suggestions.slice(0, 3),
-    reason: `Contextually inferred for ${profile.persona} (${profile.languageStyle})`,
+    reason: `Inferred contextually for ${profile.persona} (${details.theme})`,
     detectedTone: profile.sentimentTone,
-    languageUsed: profile.languageStyle,
+    languageUsed: details.language,
   };
 }
 
@@ -239,19 +464,18 @@ export async function generateContextualIcebreakers(
     .map((b) => `${b.isSelf ? 'You' : profile.threadTitle}: ${b.text}`)
     .join('\n');
 
-  const persona = profile.persona;
-  const isHinglish = profile.languageStyle === 'hinglish';
-  const recentTopics = profile.recentTopics.join(', ');
+  const detectedLang = detectConversationLanguage('', profile, bubbles);
+  const firstName = getCleanFirstName(profile.threadTitle);
 
-  const systemPrompt = `You are a conversational icebreaker generator for messaging apps.
-Recipient: ${profile.threadTitle} (${persona})
-Recent Topics: ${recentTopics || 'general'}
-Language Style: ${isHinglish ? 'Conversational Indian Hinglish' : 'Natural English'}
+  const systemPrompt = `You are a conversational icebreaker generator for WhatsApp.
+Recipient: ${firstName} (Relationship: ${profile.persona})
+Language Style: ${detectedLang === 'hinglish' ? 'Conversational Indian Hinglish' : 'Natural English'}
 
-Generate EXACTLY 3 distinct opening lines:
-1. "continuation": Picks up on the last incomplete topic or previous discussion naturally.
-2. "followup": Friendly follow-up on recent plans, work, or milestones.
-3. "checkin": Authentic check-in matching the relationship (Friend vs Boss vs Elder).
+Guidelines:
+- If this is a friend, use friendly Indian phrasing (Arre ${firstName}, Bhai, Oye). Never use full name or corporate terms like "sync".
+- Continuation option MUST pick up on the actual ongoing topic from the chat (e.g. group drama, game, train, submission, cafe).
+- Follow-up option should invite a quick chat or plan.
+- Check-in option should be a warm, genuine greeting.
 
 Respond ONLY in valid JSON:
 {
@@ -287,78 +511,77 @@ Respond ONLY in valid JSON:
   return generateIcebreakersLocally(bubbles, profile);
 }
 
-function generateIcebreakersLocally(
+export function generateIcebreakersLocally(
   bubbles: ChatBubble[],
   profile: ThreadContextProfile,
 ): IcebreakerResult {
-  const name = profile.threadTitle || 'there';
-  const isFriend = profile.persona === 'Friend' || profile.formalityLevel <= 2;
-  const isBoss = profile.persona === 'Boss' || profile.formalityLevel === 5;
+  const firstName = getCleanFirstName(profile.threadTitle);
+  const allHistory = bubbles.map((b) => b.text).join(' ').toLowerCase();
+  const isSlang =
+    /\b(bhnchoo|bc|mc|lode|chutiya|baap|deadshot|chid|bhadak|react|reaction|merko|merse|muje)\b/i.test(allHistory) ||
+    /[😂🤣]/.test(allHistory);
+  const isFriend = isSlang || profile.persona === 'Friend' || profile.formalityLevel <= 2;
+  const isBoss = profile.persona === 'Boss' || profile.persona === 'Client' || profile.formalityLevel >= 4;
   const isElder = profile.persona === 'Elder';
-  const isHinglish = profile.languageStyle === 'hinglish';
-
-  const lastBubble = bubbles.length > 0 ? bubbles[bubbles.length - 1] : null;
-  const lastSnippet = lastBubble?.text?.slice(0, 30) || '';
-  const lastTopic = profile.recentTopics.length > 0
-    ? profile.recentTopics[profile.recentTopics.length - 1]
-    : '';
 
   const suggestions: string[] = [];
 
-  // Option 1: Continuation of incomplete topic
-  if (lastTopic) {
-    if (isBoss) {
-      suggestions.push(`Good day Sir, following up on our discussion regarding the ${lastTopic}.`);
-    } else if (isElder) {
-      suggestions.push(`Pranam ${name}, ${lastTopic} ke baare me baat karni thi aapse.`);
-    } else if (isHinglish || isFriend) {
-      suggestions.push(`Arre ${name}, kal jo ${lastTopic} ka discuss kar rahe the uska kya hua?`);
+  // Detect exact conversational subject
+  const hasDrama = /\b(chid|react|reaction|emoji|qr|group|tannu)\b/i.test(allHistory);
+  const hasGame = /\b(deadshot|game|khelenge|pubg|bgmi)\b/i.test(allHistory);
+  const hasTravel = /\b(train|station|ghar pauch|network)\b/i.test(allHistory);
+  const hasSubmission = /\b(submit|exp3|pdf|assignment|lab)\b/i.test(allHistory);
+  const hasCafe = /\b(cafe|coffee|dinner|lunch)\b/i.test(allHistory);
+
+  // ── Option 1: Continuation of Incomplete Topic / Previous Discussion ──
+  if (isFriend) {
+    if (hasDrama) {
+      suggestions.push(`Aur ${firstName}, us group wale scene ka kya hua fir baad me? 😂`);
+    } else if (hasGame) {
+      suggestions.push(`Bhai Deadshot kab chalna hai fir aaj raat ko?`);
+    } else if (hasTravel) {
+      suggestions.push(`Ghar pahunch gaya tha kya bhai aaram se?`);
+    } else if (hasSubmission) {
+      suggestions.push(`Bhai lab experiment wala submission ho gaya tha na tera?`);
+    } else if (hasCafe) {
+      suggestions.push(`Aur ${firstName}, cafe chalne ka kya scene bana fir?`);
     } else {
-      suggestions.push(`Hey ${name}, following up on our chat about the ${lastTopic}!`);
+      suggestions.push(`Aur bhai ${firstName}, kya chal raha hai aaj kal?`);
     }
-  } else if (lastSnippet) {
-    if (isBoss) {
-      suggestions.push(`Hi Sir, touching base regarding our earlier discussion on "${lastSnippet}".`);
-    } else if (isElder) {
-      suggestions.push(`Namaste ${name}, pehle jo baat hui thi usi ke baare me poochna tha.`);
-    } else if (isHinglish || isFriend) {
-      suggestions.push(`Haan bhai ${name}, "${lastSnippet}" ka kya update hai?`);
-    } else {
-      suggestions.push(`Hey ${name}, wanted to quickly check back on "${lastSnippet}".`);
-    }
+  } else if (isBoss) {
+    suggestions.push(`Good day Sir, following up on our earlier discussion.`);
+  } else if (isElder) {
+    suggestions.push(`Pranam ${firstName} ji, aapse baat karni thi to message kiya.`);
   } else {
-    // Cold start continuation
-    if (isBoss) {
-      suggestions.push(`Good morning Sir, checking in regarding today's key priorities.`);
-    } else if (isElder) {
-      suggestions.push(`Pranam ${name}, aapse kafi din se baat nahi hui thi to socha message karu.`);
-    } else if (isHinglish || isFriend) {
-      suggestions.push(`Arre ${name}! Bahut time se baat nahi hui, kya chal raha hai?`);
-    } else {
-      suggestions.push(`Hey ${name}! It's been a while, how have you been?`);
-    }
+    suggestions.push(`Hey ${firstName}, following up on our previous conversation!`);
   }
 
-  // Option 2: Follow-up on availability / sync
-  if (isBoss) {
-    suggestions.push(`Please let me know if you have 5 minutes for a brief status alignment.`);
+  // ── Option 2: Follow-up on Availability / Call / Next Steps ──
+  if (isFriend) {
+    if (hasDrama) {
+      suggestions.push(`Free hoke call kariyo ${firstName}, ek mast baat batani hai.`);
+    } else if (hasGame) {
+      suggestions.push(`Free ho to aaja game pe thodi der!`);
+    } else {
+      suggestions.push(`Free ho to batao bhai, thodi der me call karta hu.`);
+    }
+  } else if (isBoss) {
+    suggestions.push(`Please let me know if you have 5 minutes for a brief status alignment Sir.`);
   } else if (isElder) {
     suggestions.push(`Aap jab bhi free ho batana ji, ek baar call pe baat karte hain.`);
-  } else if (isHinglish || isFriend) {
-    suggestions.push(`Free ho to batao, ek quick cheez discuss karni hai.`);
   } else {
     suggestions.push(`Let me know when you're free for a quick sync!`);
   }
 
-  // Option 3: Natural Warm Opener / Check-in
-  if (isBoss) {
+  // ── Option 3: Authentic Relationship Check-in ──
+  if (isFriend) {
+    suggestions.push(`Aur bhai ${firstName}, kya haal chaal? Sab sorted chal raha hai?`);
+  } else if (isBoss) {
     suggestions.push(`Good morning Sir, hope you are having a productive week.`);
   } else if (isElder) {
-    suggestions.push(`Pranam ${name}, kaisa chal raha hai sab? Hope you are doing well.`);
-  } else if (isHinglish || isFriend) {
-    suggestions.push(`Aur bhai ${name}, kya haal chaal? Sab sorted?`);
+    suggestions.push(`Pranam ${firstName} ji, kaisa chal raha hai sab? Aasha hai sab kushal hoga.`);
   } else {
-    suggestions.push(`Hey ${name}, hope you're having a great week so far!`);
+    suggestions.push(`Hey ${firstName}, hope you're having a great week so far!`);
   }
 
   return {
@@ -369,47 +592,48 @@ function generateIcebreakersLocally(
 
 // ─── 3. Context-Aware Message Improvement ───────────────────────────────────
 
+export interface ImproveMessageResult {
+  improvedDraft: string;
+  alternativeDrafts: string[];
+  explanation: string;
+  wasModified: boolean;
+}
+
 export async function improveMessageWithContext(
   rawDraft: string,
   profile: ThreadContextProfile,
   globalIntent: GlobalUserIntent,
   bubbles: ChatBubble[] = [],
-): Promise<{
-  improvedDraft: string;
-  explanation: string;
-  wasModified: boolean;
-}> {
+): Promise<ImproveMessageResult> {
   const trimmed = rawDraft.trim();
   if (!trimmed) {
     return {
       improvedDraft: '',
+      alternativeDrafts: [],
       explanation: 'No draft provided',
       wasModified: false,
     };
   }
 
+  const detectedLang = detectConversationLanguage(rawDraft, profile, bubbles);
+  const details = extractConversationDetails(rawDraft, profile, bubbles);
   const sanitized = sanitizeText(trimmed).sanitized;
   const recentHistory = sanitizeBubbles(bubbles.slice(-4))
     .map((b) => `${b.isSelf ? 'You' : profile.threadTitle}: ${b.text}`)
     .join('\n');
 
-  const persona = profile.persona;
-  const formality = profile.formalityLevel;
-  const isHinglish = profile.languageStyle === 'hinglish';
-
   const systemPrompt = `You are an expert Indian messaging assistant improving a drafted chat message.
-Recipient: ${profile.threadTitle} (${persona}, Formality: ${formality}/5)
-Style: ${isHinglish ? 'Polite Indian Hinglish' : 'Polite natural English'}
+Recipient: ${profile.threadTitle} (Relationship: ${profile.persona}, Formality: ${details.formality}/5)
+Style: ${details.isSlang ? 'Natural friendly Indian buddy tone' : 'Polite natural Indian Hinglish'}
 
 Instructions:
-1. If the message is blunt, harsh, or disrespectful (e.g. "tu jaldi bhej", "send now", "why did you delay"), rephrase it politely and respectfully matching the relationship persona.
-2. If the recipient is Boss, Elder, or Client: use appropriate respect, softeners (please, kindly, Sir), and proper pronouns.
-3. If the recipient is Friend: keep it friendly, natural, and warm without sounding robotic or overly formal.
-4. Preserve the user's core intent. Do NOT change facts or dates.
-
+1. Improve the draft message to match the natural tone, language, and relationship.
+2. If blunt/demanding (e.g. "tu jaldi bhej", "send now", "kahan hai"), rephrase into a warm, natural message.
+3. Provide 1 primary improved message and 2 alternative variations.
 Respond ONLY in valid JSON:
 {
-  "improvedDraft": "the polished message text",
+  "improvedDraft": "primary polished message text",
+  "alternativeDrafts": ["Alternative 1", "Alternative 2"],
   "explanation": "why and how the message was improved"
 }`;
 
@@ -430,7 +654,8 @@ Respond ONLY in valid JSON:
     if (parsed.improvedDraft && parsed.improvedDraft.trim()) {
       return {
         improvedDraft: parsed.improvedDraft.trim(),
-        explanation: parsed.explanation || `Polished for ${persona}`,
+        alternativeDrafts: Array.isArray(parsed.alternativeDrafts) ? parsed.alternativeDrafts.slice(0, 2) : [],
+        explanation: parsed.explanation || `Polished for ${profile.persona} (${detectedLang})`,
         wasModified: parsed.improvedDraft.trim() !== trimmed,
       };
     }
@@ -438,54 +663,85 @@ Respond ONLY in valid JSON:
     // Local contextual enhancer
   }
 
-  return improveMessageLocally(trimmed, profile);
+  return improveMessageLocally(trimmed, profile, bubbles);
 }
 
-function improveMessageLocally(
+export function improveMessageLocally(
   draft: string,
   profile: ThreadContextProfile,
-): { improvedDraft: string; explanation: string; wasModified: boolean } {
+  bubbles: ChatBubble[] = [],
+): ImproveMessageResult {
   const lower = draft.toLowerCase();
-  const isBossOrClient = profile.persona === 'Boss' || profile.persona === 'Client' || profile.formalityLevel >= 4;
+  const details = extractConversationDetails(draft, profile, bubbles);
+  const isSlang = details.isSlang || details.formality === 1;
+  const isBossOrClient = profile.persona === 'Boss' || profile.persona === 'Client' || details.formality >= 4;
   const isElder = profile.persona === 'Elder';
-  const isFriend = profile.persona === 'Friend' || profile.formalityLevel <= 2;
+  const isFriend = isSlang || profile.persona === 'Friend' || details.formality <= 2;
 
   let improved = draft;
-  let explanation = 'Enhanced phrasing and tone';
+  const alternatives: string[] = [];
+  let explanation = 'Enhanced phrasing and conversational tone';
 
-  // Check for blunt/demanding phrasing: "tu bhej", "jaldi bhej", "send now"
-  const isDemanding = /\b(tu|jaldi bhej|bhej abhi|send now|give me|why didn't|where is)\b/i.test(lower);
-
+  // Common messaging patterns
   if (isBossOrClient) {
-    if (isDemanding) {
+    if (lower.includes('bhej') || lower.includes('send') || lower.includes('give')) {
       improved = `Sir, could you please share the update whenever you have a moment? Thank you.`;
-      explanation = 'Softened demanding phrasing with respectful honorifics for Boss/Client.';
-    } else if (!lower.includes('please') && !lower.includes('kindly')) {
-      improved = `Could you please check this: "${draft}"? Thank you, Sir.`;
-      explanation = 'Added polite framing and honorific for senior contact.';
+      alternatives.push(`Kindly share the files at your earliest convenience, Sir.`);
+      alternatives.push(`Following up regarding the documents, whenever suitable Sir.`);
+      explanation = 'Rephrased requesting update with respectful professional framing for senior.';
+    } else if (lower.includes('kahan') || lower.includes('where')) {
+      improved = `Good day Sir, just checking in to confirm your arrival time/status. Thank you.`;
+      alternatives.push(`Sir, please let me know your estimated arrival time.`);
+      explanation = 'Softened status inquiry with respectful honorifics.';
+    } else {
+      improved = `Sir, ${draft} — kindly letting you know. Thank you.`;
+      alternatives.push(`Could you please check this: "${draft}"? Thank you, Sir.`);
+      explanation = 'Added professional framing for senior contact.';
     }
   } else if (isElder) {
-    if (isDemanding) {
-      improved = `Pranam, kripya aapse anurodh hai ki thoda jaldi bhej denge to sahi rahega.`;
-      explanation = 'Converted blunt phrasing to respectful Hindi pronouns (Aap/Kripya).';
+    if (lower.includes('bhej') || lower.includes('de')) {
+      improved = `Pranam, aapse anurodh hai ki samay milte hi bhej dijiye ga.`;
+      alternatives.push(`Pranam ji, jab bhi aapke paas samay ho forward kar dijiyega.`);
+      explanation = 'Converted to respectful Hindi honorifics (Pranam / Anurodh).';
+    } else if (lower.includes('kahan') || lower.includes('kidhar')) {
+      improved = `Pranam ji, aap kahan pahunche? Aasha hai sab kushal hoga.`;
+      alternatives.push(`Pranam ji, pahunch kar ek baar inform kar dijiye ga.`);
+      explanation = 'Added respectful elder greeting.';
     } else {
-      improved = `Pranam, ${draft} — aapse request hai.`;
-      explanation = 'Prefixed respectful greeting for Elder.';
+      improved = `Pranam ji, ${draft}`;
+      alternatives.push(`Pranam, ${draft} — aapse anurodh hai.`);
+      explanation = 'Added respectful elder greeting.';
     }
   } else if (isFriend) {
-    if (isDemanding) {
+    if (lower.includes('jaldi bhej') || lower.includes('tu bhej') || lower.includes('send now')) {
       improved = `Bhai thoda jaldi bhej de please, wait kar raha hu!`;
-      explanation = 'Reframed to warm and friendly buddy tone.';
+      alternatives.push(`Oye jaldi bhej na bhai, kitna time lagayega 😂`);
+      alternatives.push(`Bhai free hote hi forward kar diyo please!`);
+      explanation = 'Replaced blunt demand with friendly, natural peer phrasing.';
+    } else if (lower.includes('kahan hai') || lower.includes('kaha hai') || lower.includes('where are you')) {
+      improved = `Bhai kidhar pahuncha? Bata de ek baar.`;
+      alternatives.push(`Oye kahan fasa hua hai abhi?`);
+      alternatives.push(`Bhai location pe hi ho ya nikal rahe ho?`);
+      explanation = 'Made inquiry warmer and conversational.';
+    } else if (lower.includes('call kar') || lower.includes('phone kar')) {
+      improved = `Bhai free hoke ek baar call kar le please.`;
+      alternatives.push(`Free ho to aaja call pe thodi der!`);
+      explanation = 'Polished call request to warm buddy tone.';
+    } else if (lower.includes('done') || lower.includes('theek hai')) {
+      improved = `Haan done hai bhai, scene sorted!`;
+      alternatives.push(`Sahi hai bhai, chalega!`);
+      explanation = 'Polished confirmation with natural buddy slang.';
     } else {
       improved = `${draft} bhai!`;
-      explanation = 'Polished friendly tone.';
+      alternatives.push(`${draft} yaar!`);
+      explanation = 'Reframed to natural, warm buddy tone.';
     }
   }
 
   return {
     improvedDraft: improved,
+    alternativeDrafts: alternatives.slice(0, 2),
     explanation,
     wasModified: improved !== draft,
   };
 }
-
