@@ -216,21 +216,30 @@ export async function generateSmartReplies(
   const detectedLang = detectConversationLanguage(incomingMessage, profile, bubbles);
   const details = extractConversationDetails(incomingMessage, profile, bubbles);
 
-  const systemPrompt = `You are an AI assistant generating 3 conversational quick-replies for WhatsApp.
-Recipient: ${profile.threadTitle} (Relationship: ${profile.persona}, Formality: ${details.formality}/5)
-Tone: ${details.isSlang ? 'Casual Indian Slang / College Buddy banter' : 'Natural conversational Hinglish'}
-Language: ${detectedLang === 'hinglish' ? 'Conversational Indian Hinglish' : 'Natural English'}
+  // Build a representative sample of actual words used in the conversation to enforce style
+  const allWords = bubbles.flatMap(b => b.text.toLowerCase().split(/\s+/)).filter(w => w.length > 1);
+  const sampleSlangUsed = allWords.filter(w => SLANG_WORDS.has(w.replace(/[^a-z0-9]/g, ''))).slice(0, 6);
+  const styleEnforcer = sampleSlangUsed.length > 0
+    ? `CRITICAL: The conversation uses words like: ${sampleSlangUsed.join(', ')}. Your replies MUST use the same vocabulary and slang. Do NOT switch to formal or generic English.`
+    : detectedLang === 'hinglish'
+    ? `CRITICAL: The conversation is in Indian Hinglish. All 3 replies MUST be in the same Hinglish mix as the chat. Do NOT reply in pure English or use corporate language.`
+    : '';
 
-Context Guidelines:
-- Directly reply to what the other person actually said.
-- If they are discussing a group incident, laughing emoji, or drama: reply directly about that drama with matching buddy tone.
-- If they are talking about gaming, submissions, or plans: address that specifically.
-- Never use generic placeholder greetings like "sab mast bhai" unless it's a bare greeting.
-Respond ONLY in valid JSON:
-{
-  "suggestions": ["Option 1", "Option 2", "Option 3"],
-  "reason": "Brief explanation of tone and intent"
-}`;
+  const systemPrompt = `You are a WhatsApp quick-reply assistant. Generate exactly 3 replies for the LAST incoming message.
+
+Recipient first name: ${details.firstName}
+Relationship: ${profile.persona}, Formality: ${details.formality}/5
+${styleEnforcer}
+
+Rules:
+1. READ the last message carefully. Reply SPECIFICALLY to what was said — not a generic greeting.
+2. Match the EXACT tone: ${details.isSlang ? 'casual Indian college buddy slang (use "bhai", "bro", "yaar", abusive slang if used in chat)' : detectedLang === 'hinglish' ? 'natural Hinglish (mix Hindi + English words as they do)' : 'natural conversational English'}.
+3. Each reply must be SHORT (under 12 words ideally), direct, and sound like a real person texted it.
+4. If the chat has drama/gossip/reaction topics: reply about THAT drama. If gaming: reply about THAT game. If travel: reply about THAT journey. Never deviate.
+5. NEVER start with "Sab mast", "Hope you are doing well", "How are things" — that is not how friends text.
+
+Respond ONLY in valid JSON (no markdown, no extra text):
+{"suggestions": ["reply1", "reply2", "reply3"], "reason": "one line tone explanation"}`;
 
   try {
     const raw = await queryEvonLlm(
@@ -238,14 +247,16 @@ Respond ONLY in valid JSON:
         { role: 'system', content: systemPrompt },
         {
           role: 'user',
-          content: `Recent Chat History:\n${recentHistory}\n\nLast Incoming Message:\n"${sanitizedMsg}"`,
+          content: `Full Chat History (oldest to newest):\n${recentHistory}\n\n>> Last message to reply to: "${sanitizedMsg}"`,
         },
       ],
-      0.6,
-      3500,
+      0.7,
+      5000,
     );
 
-    const parsed = JSON.parse(raw);
+    // Try to extract JSON even if LLM wraps in markdown
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(raw);
     if (Array.isArray(parsed.suggestions) && parsed.suggestions.length > 0) {
       return {
         suggestions: parsed.suggestions.slice(0, 3),
@@ -459,45 +470,54 @@ export async function generateContextualIcebreakers(
   profile: ThreadContextProfile,
   globalIntent: GlobalUserIntent,
 ): Promise<IcebreakerResult> {
-  const safeBubbles = sanitizeBubbles(bubbles.slice(-8));
+  const safeBubbles = sanitizeBubbles(bubbles.slice(-10));
+  const firstName = getCleanFirstName(profile.threadTitle);
   const history = safeBubbles
-    .map((b) => `${b.isSelf ? 'You' : profile.threadTitle}: ${b.text}`)
+    .map((b) => `${b.isSelf ? 'You' : firstName}: ${b.text}`)
     .join('\n');
 
   const detectedLang = detectConversationLanguage('', profile, bubbles);
-  const firstName = getCleanFirstName(profile.threadTitle);
+  const details = extractConversationDetails(
+    bubbles.length > 0 ? bubbles[bubbles.length - 1].text : '',
+    profile,
+    bubbles,
+  );
 
-  const systemPrompt = `You are a conversational icebreaker generator for WhatsApp.
-Recipient: ${firstName} (Relationship: ${profile.persona})
-Language Style: ${detectedLang === 'hinglish' ? 'Conversational Indian Hinglish' : 'Natural English'}
+  // Build style enforcer from actual conversation words
+  const allWords = bubbles.flatMap(b => b.text.toLowerCase().split(/\s+/));
+  const sampleSlang = allWords.filter(w => SLANG_WORDS.has(w.replace(/[^a-z0-9]/g, ''))).slice(0, 5);
+  const styleHint = sampleSlang.length > 0
+    ? `The chat uses: ${sampleSlang.join(', ')}. Use that same register.`
+    : detectedLang === 'hinglish' ? `Write in Hinglish the same way as the chat above.` : '';
 
-Guidelines:
-- If this is a friend, use friendly Indian phrasing (Arre ${firstName}, Bhai, Oye). Never use full name or corporate terms like "sync".
-- Continuation option MUST pick up on the actual ongoing topic from the chat (e.g. group drama, game, train, submission, cafe).
-- Follow-up option should invite a quick chat or plan.
-- Check-in option should be a warm, genuine greeting.
+  const systemPrompt = `You are generating 3 conversation-opener messages for WhatsApp. The user wants to restart or continue a conversation with ${firstName}.
 
-Respond ONLY in valid JSON:
-{
-  "suggestions": [
-    "Continuation option",
-    "Follow-up option",
-    "Check-in option"
-  ],
-  "category": "followup"
-}`;
+IMPORTANT:
+- Use ONLY the first name "${firstName}" — never the full name.
+- Language: ${detectedLang === 'hinglish' ? 'Conversational Indian Hinglish' : 'Natural English'}.
+- ${styleHint}
+- Relationship: ${profile.persona}. ${profile.persona === 'Friend' ? 'Use buddy language (yaar, bhai, oye, arre). No corporate terms like "sync" or "kindly".' : ''}
+- Opener 1: Pick up on the MOST RECENT topic discussed (the actual thing they were talking about last — drama, game, travel, submission, etc.) and ask a natural follow-up.
+- Opener 2: Invite to connect or continue the chat naturally.
+- Opener 3: A warm casual check-in.
+- Each opener must sound like a real person texting — short, casual, genuine.
+
+Respond ONLY in valid JSON (no markdown):
+{"suggestions": ["opener1", "opener2", "opener3"], "category": "followup"}`;
 
   try {
     const raw = await queryEvonLlm(
       [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Chat History:\n${history || 'No prior messages'}` },
+        { role: 'user', content: `Chat History (most recent messages):\n${history || 'No prior messages — generate a fresh opener.'}` },
       ],
-      0.65,
-      3500,
+      0.72,
+      5000,
     );
 
-    const parsed = JSON.parse(raw);
+    // Extract JSON even if LLM wraps in markdown code blocks
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(raw);
     if (Array.isArray(parsed.suggestions) && parsed.suggestions.length > 0) {
       return {
         suggestions: parsed.suggestions.slice(0, 3),
@@ -622,19 +642,24 @@ export async function improveMessageWithContext(
     .map((b) => `${b.isSelf ? 'You' : profile.threadTitle}: ${b.text}`)
     .join('\n');
 
-  const systemPrompt = `You are an expert Indian messaging assistant improving a drafted chat message.
-Recipient: ${profile.threadTitle} (Relationship: ${profile.persona}, Formality: ${details.formality}/5)
-Style: ${details.isSlang ? 'Natural friendly Indian buddy tone' : 'Polite natural Indian Hinglish'}
+  const systemPrompt = `You are improving a WhatsApp draft message. Make it sound better while keeping the SAME tone and language as the conversation.
 
-Instructions:
-1. Improve the draft message to match the natural tone, language, and relationship.
-2. If blunt/demanding (e.g. "tu jaldi bhej", "send now", "kahan hai"), rephrase into a warm, natural message.
-3. Provide 1 primary improved message and 2 alternative variations.
-Respond ONLY in valid JSON:
+Recipient: ${details.firstName} (Relationship: ${profile.persona}, Formality: ${details.formality}/5)
+Language: ${detectedLang === 'hinglish' ? 'Indian Hinglish (mix Hindi+English as in the chat)' : 'Natural English'}
+Style: ${details.isSlang ? 'Casual buddy slang — keep it informal and natural' : details.formality >= 4 ? 'Formal and respectful' : 'Natural conversational'}
+
+Rules:
+1. Improve clarity, warmth, and flow — but STAY in the same language and tone as the draft.
+2. If the draft is in Hinglish, improve it IN Hinglish. Do NOT switch to formal English.
+3. If the draft is blunt or awkward, rephrase it to sound more natural for a ${profile.persona}.
+4. Keep it SHORT — under 20 words per option ideally.
+5. Provide 1 primary improved version + 2 alternatives (slight variations in phrasing).
+
+Respond ONLY in valid JSON (no markdown):
 {
-  "improvedDraft": "primary polished message text",
-  "alternativeDrafts": ["Alternative 1", "Alternative 2"],
-  "explanation": "why and how the message was improved"
+  "improvedDraft": "best improved version",
+  "alternativeDrafts": ["alt1", "alt2"],
+  "explanation": "what was improved"
 }`;
 
   try {
@@ -643,14 +668,16 @@ Respond ONLY in valid JSON:
         { role: 'system', content: systemPrompt },
         {
           role: 'user',
-          content: `Context:\n${recentHistory}\n\nDraft Message:\n"${sanitized}"`,
+          content: `Recent Conversation Context:\n${recentHistory || 'No prior context'}\n\nDraft to improve:\n"${sanitized}"`,
         },
       ],
-      0.3,
-      3500,
+      0.35,
+      5000,
     );
 
-    const parsed = JSON.parse(raw);
+    // Extract JSON even if LLM wraps in markdown code blocks
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(raw);
     if (parsed.improvedDraft && parsed.improvedDraft.trim()) {
       return {
         improvedDraft: parsed.improvedDraft.trim(),

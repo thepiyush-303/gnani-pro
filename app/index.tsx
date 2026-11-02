@@ -56,6 +56,7 @@ import {
   improveMessageWithContext,
   ImproveMessageResult,
 } from '../src/services/contextIntelligenceEngine';
+import { getCleanFirstName } from '../src/services/conversationContextDb';
 
 // ─────────────────────────────────────────────
 // Types
@@ -238,7 +239,7 @@ export default function DashboardScreen() {
               );
               if (replies.suggestions.length > 0) {
                 setLiveSmartReplies(replies.suggestions);
-                const firstName = (profile.threadTitle || 'Contact').split(' ')[0] || profile.threadTitle;
+                const firstName = getCleanFirstName(profile.threadTitle || 'Contact');
                 const sub = `${profile.persona} (${profile.languageStyle === 'hinglish' ? 'Hinglish' : 'English'})`;
                 setLiveSmartReplySubtitle(sub);
                 await IndicContext.showSmartReplies(
@@ -306,16 +307,21 @@ export default function DashboardScreen() {
 
         const profile = await getThreadContext(threadId, threadTitle);
         const globalIntent = await getGlobalUserIntent();
-        const rawDraft = event.draftText || (await IndicContext.readInputFieldText()) || '';
+
+        // Read the current input field text — event.draftText is set by OverlayService at tap time
+        // Fall back to readInputFieldText() which polls via AccessibilityService
+        const rawDraft = (event.draftText && event.draftText.trim())
+          ? event.draftText.trim()
+          : ((await IndicContext.readInputFieldText()) || '').trim();
 
         if (event.action === 'improve') {
-          const draftToImprove = rawDraft.trim() || testDraft.trim();
-          const firstName = (profile.threadTitle || 'Contact').split(' ')[0] || profile.threadTitle;
+          const draftToImprove = rawDraft;
+          const firstName = getCleanFirstName(profile.threadTitle || 'Contact');
 
           if (!draftToImprove) {
             await IndicContext.showSmartReplies(
-              '✏️ Draft Required',
-              'Type a message in WhatsApp input bar first',
+              '✏️ Type something first',
+              'Write a message in WhatsApp, then tap ✨',
               [
                 'Haan bhai, bol kya scene hai?',
                 'Sun, ek baat batani thi',
@@ -340,8 +346,8 @@ export default function DashboardScreen() {
 
           // Show floating recommendation chips directly on top of WhatsApp!
           await IndicContext.showSmartReplies(
-            `✨ Improved for ${firstName} (${profile.persona})`,
-            `Tap any option to replace in WhatsApp`,
+            `✨ Improved for ${firstName}`,
+            `Original: "${draftToImprove.slice(0, 30)}${draftToImprove.length > 30 ? '...' : ''}"`,
             suggestions,
           );
 
@@ -383,7 +389,7 @@ export default function DashboardScreen() {
           if (iceResult.suggestions.length > 0) {
             setLiveIcebreakers(iceResult.suggestions);
 
-            const firstName = (profile.threadTitle || 'Contact').split(' ')[0] || profile.threadTitle;
+            const firstName = getCleanFirstName(profile.threadTitle || 'Contact');
             // Show overlay recommendation card directly on WhatsApp
             await IndicContext.showSmartReplies(
               `🧊 Icebreakers for ${firstName}`,
