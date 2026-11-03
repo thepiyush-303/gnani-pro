@@ -643,48 +643,181 @@ class ChatAccessibilityService : AccessibilityService() {
     // Buffer capture
     // ───────────────────────────────────────────────────────────────
 
-    private fun walkAndCapture(root: AccessibilityNodeInfo, pkg: String): Int {
-        var added = 0
-        val screenW = resources.displayMetrics.widthPixels
-        val density = resources.displayMetrics.density
-        val headerMaxY = (90 * density).toInt()
-        val bounds = Rect()
+    /** A message visible on screen in this capture pass. */
+    private data class VisibleMessage(val text: String, val isSelf: Boolean?, val top: Int, val cls: String)
 
+    /**
+     * Captures the messages currently on screen, in on-screen order, with a
+     * resolved sender, and merges them into the session buffer.
+     *
+     * Sender resolution (strict — unresolved stays null and is dropped in JS):
+     *  1. WhatsApp: `message_text` nodes; a row containing the delivery-tick
+     *     `status` view is outgoing (isSelf = true).
+     *  2. Otherwise: bubble-container geometry (left gap vs right gap).
+     *
+     * @return number of buffer changes (added or re-attributed messages).
+     */
+    private fun walkAndCapture(root: AccessibilityNodeInfo, pkg: String): Int {
+        var visible = collectWhatsAppMessages(root, pkg)
+        if (visible.isEmpty()) visible = collectByGeometry(root, pkg)
+        if (visible.isEmpty()) return 0
+
+        val ordered = visible.sortedBy { it.top }
+        for (m in ordered) {
+            val tag = when (m.isSelf) { true -> "user"; false -> "contact"; null -> "?" }
+            Log.d(TAG, "capture [$tag] ${m.text.take(40)}")
+        }
+        return buffer.mergeVisible(ordered.map {
+            ChatBubble(text = it.text, isSelf = it.isSelf, nodeClassName = it.cls, appPackage = pkg)
+        })
+    }
+
+    private fun collectWhatsAppMessages(root: AccessibilityNodeInfo, pkg: String): List<VisibleMessage> {
+        if (pkg != "com.whatsapp" && pkg != "com.whatsapp.w4b") return emptyList()
+        val nodes = try {
+            root.findAccessibilityNodeInfosByViewId("$pkg:id/message_text")
+        } catch (e: Exception) { null } ?: return emptyList()
+
+        val out = ArrayList<VisibleMessage>()
+        val bounds = Rect()
+        for (node in nodes) {
+            try {
+                val text = node.text?.toString()?.trim().orEmpty()
+                if (text.isEmpty() || isMessagePlaceholder(text)) continue
+                node.getBoundsInScreen(bounds)
+                if (bounds.height() <= 0) continue
+
+                val chain = ancestors(node, 10)
+                try {
+                    val rowIdx = chain.indexOfFirst { isListContainer(it) } - 1
+                    val below = if (rowIdx >= 0) chain.subList(0, rowIdx) else chain
+                    // Quoted-reply snippets live inside a "quoted…" container — not a message of their own
+                    if (below.any { it.viewIdResourceName?.contains("quoted", ignoreCase = true) == true }) continue
+
+                    val row = if (rowIdx >= 0) chain[rowIdx] else null
+                    val isSelf = when {
+                        row != null && hasViewId(row, "$pkg:id/status") -> true
+                        else -> senderFromGeometry(node, below)
+                    }
+                    out.add(VisibleMessage(text, isSelf, bounds.top, node.className?.toString() ?: ""))
+                } finally {
+                    chain.forEach { safeRecycle(it) }
+                }
+            } finally {
+                safeRecycle(node)
+            }
+        }
+        return out
+    }
+
+    /** Fallback for apps/versions where message view IDs are unknown. */
+    private fun collectByGeometry(root: AccessibilityNodeInfo, pkg: String): List<VisibleMessage> {
+        val headerMaxY = (90 * resources.displayMetrics.density).toInt()
+        val bounds = Rect()
+        val out = ArrayList<VisibleMessage>()
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
-            val text = node.text?.toString()
             val cls = node.className?.toString() ?: ""
-            if (text != null && text.isNotBlank() && cls.endsWith("TextView")) {
-                val cleanText = text.trim()
+            val text = node.text?.toString()?.trim().orEmpty()
+            if (text.isNotEmpty() && cls.endsWith("TextView") && !isNoiseText(text)) {
                 node.getBoundsInScreen(bounds)
-
-                // Skip views inside the top header (contact name, status bar, app name)
-                val isInHeader = bounds.bottom <= headerMaxY
-
-                // Ignore timestamps (e.g., "10:45 AM", "12:30 pm") and tiny words
-                val isTimeStamp = cleanText.matches(Regex(".*\\d{1,2}:\\d{2}.*"))   
-
-                if (!isInHeader && cleanText.length > 3 && !isTimeStamp) {
-                    val isSelf = when {
-                        bounds.left > screenW * 0.28f -> true
-                        bounds.right < screenW * 0.82f -> false
-                        else -> null
+                if (bounds.bottom > headerMaxY && bounds.height() > 0) {
+                    val chain = ancestors(node, 6)
+                    try {
+                        out.add(VisibleMessage(text, senderFromGeometry(node, chain), bounds.top, cls))
+                    } finally {
+                        chain.forEach { safeRecycle(it) }
                     }
-                    val bubble = ChatBubble(
-                        text = cleanText,
-                        isSelf = isSelf,
-                        nodeClassName = cls,
-                        appPackage = pkg,
-                    )
-                    if (buffer.add(bubble)) added++
                 }
             }
             for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
-            if (node !== root) node.recycle()
+            if (node !== root) safeRecycle(node)
         }
-        return added
+        return out
+    }
+
+    /**
+     * Decides the sender from where the message bubble sits horizontally.
+     * Uses the outermost ancestor that is still narrower than the screen (the
+     * bubble), not the TextView, so long messages are classified correctly.
+     * Returns null when the bubble is roughly centred (ambiguous).
+     */
+    private fun senderFromGeometry(node: AccessibilityNodeInfo, ancestorsBelowRow: List<AccessibilityNodeInfo>): Boolean? {
+        val screenW = resources.displayMetrics.widthPixels
+        val b = Rect()
+        val bubble = Rect()
+        node.getBoundsInScreen(bubble)
+        for (a in ancestorsBelowRow) {
+            a.getBoundsInScreen(b)
+            if (b.width() < screenW * 0.92f && b.contains(bubble)) bubble.set(b) else if (b.width() >= screenW * 0.92f) break
+        }
+        val leftGap = bubble.left
+        val rightGap = screenW - bubble.right
+        val margin = screenW * 0.06f
+        return when {
+            leftGap - rightGap > margin -> true    // hugs the right edge → sent by user
+            rightGap - leftGap > margin -> false   // hugs the left edge → from contact
+            else -> null
+        }
+    }
+
+    private fun ancestors(node: AccessibilityNodeInfo, max: Int): List<AccessibilityNodeInfo> {
+        val out = ArrayList<AccessibilityNodeInfo>(max)
+        var cur = try { node.parent } catch (e: Exception) { null }
+        while (cur != null && out.size < max) {
+            out.add(cur)
+            cur = try { cur.parent } catch (e: Exception) { null }
+        }
+        cur?.let { safeRecycle(it) }
+        return out
+    }
+
+    private fun isListContainer(n: AccessibilityNodeInfo): Boolean {
+        val cls = n.className?.toString() ?: ""
+        return cls.endsWith("RecyclerView") || cls.endsWith("ListView") || n.viewIdResourceName == "android:id/list"
+    }
+
+    private fun hasViewId(n: AccessibilityNodeInfo, viewId: String): Boolean {
+        val found = try { n.findAccessibilityNodeInfosByViewId(viewId) } catch (e: Exception) { null }
+        val hit = !found.isNullOrEmpty()
+        found?.forEach { safeRecycle(it) }
+        return hit
+    }
+
+    private fun safeRecycle(n: AccessibilityNodeInfo) {
+        try { n.recycle() } catch (e: Exception) {}
+    }
+
+    private val TIMESTAMP_ONLY = Regex("""^\d{1,2}[:.]\d{2}\s*([aApP]\.?[mM]\.?)?$""")
+    private val DATE_CHIP = Regex(
+        """^(today|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|""" +
+            """\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|""" +
+            """\d{1,2} [a-z]+ \d{4}|[a-z]+ \d{1,2}, \d{4})$""",
+        RegexOption.IGNORE_CASE,
+    )
+    /** Placeholders that can appear inside a real message bubble. */
+    private val MESSAGE_PLACEHOLDER = Regex(
+        """^(this message was deleted|you deleted this message|waiting for this message.*)$""",
+        RegexOption.IGNORE_CASE,
+    )
+    /** Screen chrome picked up only by the geometry fallback. */
+    private val SCREEN_CHROME = Regex(
+        """(end-to-end encrypted|^\d+ unread messages?$|^typing…?$|^online$|^last seen )""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private fun normalizeSpaces(raw: String) = raw.replace('\u202F', ' ').replace('\u00A0', ' ').trim()
+
+    /** For text taken from a known message view: only deleted/pending placeholders are noise. */
+    private fun isMessagePlaceholder(raw: String): Boolean = MESSAGE_PLACEHOLDER.matches(normalizeSpaces(raw))
+
+    /** For arbitrary TextViews (geometry fallback): also drop timestamps, date chips and screen chrome. */
+    private fun isNoiseText(raw: String): Boolean {
+        val t = normalizeSpaces(raw)
+        return MESSAGE_PLACEHOLDER.matches(t) || TIMESTAMP_ONLY.matches(t) || DATE_CHIP.matches(t) ||
+            SCREEN_CHROME.containsMatchIn(t)
     }
 
     private fun scheduleBufferEvent() {

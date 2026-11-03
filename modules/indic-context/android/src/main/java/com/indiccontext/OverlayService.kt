@@ -388,90 +388,90 @@ class OverlayService : Service() {
     // ── Smart Reply & Recommendations Floating Card ──
     private var recommendationView: View? = null
     private var recommendationParams: WindowManager.LayoutParams? = null
-    private var lastShownSuggestions: List<String> = emptyList()
+    private var lastShownChipLabels: List<String> = emptyList()
     private var lastShownTitle: String = ""
 
+    /** A tappable chip on the floating card. */
+    private data class CardChip(val label: String, val onTap: () -> Unit)
+
+    /** Suggestions card: tapping a chip injects that text into the chat input. */
     fun showRecommendations(title: String, subtitle: String?, suggestions: List<String>) {
+        if (suggestions.isEmpty()) return
+        showCard(title, subtitle, suggestions.map { text ->
+            CardChip(text) {
+                val ok = ChatAccessibilityService.instance?.injectText(text) ?: false
+                if (ok) {
+                    Toast.makeText(applicationContext, "Inserted", Toast.LENGTH_SHORT).show()
+                }
+                hideRecommendations()
+            }
+        })
+    }
+
+    /**
+     * Notice/error card (e.g. LLM unreachable, empty draft). When [retryAction]
+     * is set, a single "↻ Retry" chip re-fires that action to JS (same path as
+     * tapping the toolbar button) instead of injecting any text.
+     */
+    fun showAiError(title: String, message: String, retryAction: String?) {
+        val chips = if (retryAction.isNullOrBlank()) emptyList() else listOf(
+            CardChip("↻ Retry") {
+                hideRecommendations()
+                val draft = ChatAccessibilityService.instance?.readInputFieldText()
+                IndicContextModule.instance?.emitActionTriggered(retryAction, draft)
+            }
+        )
+        showCard(title, message, chips)
+    }
+
+    private fun bindCard(view: View, title: String, subtitle: String?, chips: List<CardChip>) {
+        view.findViewById<TextView>(R.id.txt_recommendation_title)?.text = title
+        view.findViewById<TextView>(R.id.txt_recommendation_subtitle)?.let { txtSub ->
+            if (subtitle.isNullOrBlank()) {
+                txtSub.visibility = View.GONE
+            } else {
+                txtSub.text = subtitle
+                txtSub.visibility = View.VISIBLE
+            }
+        }
+        val chipViews = listOf(
+            view.findViewById<TextView>(R.id.chip_recommendation_1),
+            view.findViewById<TextView>(R.id.chip_recommendation_2),
+            view.findViewById<TextView>(R.id.chip_recommendation_3),
+        )
+        chipViews.forEach { it?.visibility = View.GONE }
+        for (i in 0 until minOf(chips.size, chipViews.size)) {
+            val chipView = chipViews[i] ?: continue
+            val chip = chips[i]
+            chipView.text = chip.label
+            chipView.visibility = View.VISIBLE
+            chipView.setOnClickListener { chip.onTap() }
+        }
+    }
+
+    private fun showCard(title: String, subtitle: String?, chips: List<CardChip>) {
         mainHandler.post {
             val wm = windowManager ?: return@post
-            if (suggestions.isEmpty()) return@post
+            val labels = chips.map { it.label }
 
-            // If identical suggestions are already displayed, avoid any DOM reconstruction
-            if (recommendationView != null && lastShownSuggestions == suggestions && lastShownTitle == title) {
+            // If the identical card is already displayed, avoid rebuilding it
+            if (recommendationView != null && lastShownChipLabels == labels && lastShownTitle == title) {
                 return@post
             }
-
-            lastShownSuggestions = suggestions
+            lastShownChipLabels = labels
             lastShownTitle = title
 
             val existingView = recommendationView
             if (existingView != null) {
-                // Update in place to prevent any flickering
-                val txtTitle = existingView.findViewById<TextView>(R.id.txt_recommendation_title)
-                val txtSub = existingView.findViewById<TextView>(R.id.txt_recommendation_subtitle)
-                val chip1 = existingView.findViewById<TextView>(R.id.chip_recommendation_1)
-                val chip2 = existingView.findViewById<TextView>(R.id.chip_recommendation_2)
-                val chip3 = existingView.findViewById<TextView>(R.id.chip_recommendation_3)
-
-                txtTitle?.text = title
-                if (!subtitle.isNullOrBlank()) {
-                    txtSub?.text = subtitle
-                    txtSub?.visibility = View.VISIBLE
-                }
-
-                val chips = listOf(chip1, chip2, chip3)
-                chips.forEach { it?.visibility = View.GONE }
-
-                for (i in 0 until minOf(suggestions.size, chips.size)) {
-                    val chip = chips[i] ?: continue
-                    val text = suggestions[i]
-                    chip.text = text
-                    chip.visibility = View.VISIBLE
-                    chip.setOnClickListener {
-                        val ok = ChatAccessibilityService.instance?.injectText(text) ?: false
-                        if (ok) {
-                            Toast.makeText(applicationContext, "Injected: $text", Toast.LENGTH_SHORT).show()
-                        }
-                        hideRecommendations()
-                    }
-                }
+                // Update in place to prevent flicker
+                bindCard(existingView, title, subtitle, chips)
                 return@post
             }
 
-            // Otherwise inflate and add new window
             val view = LayoutInflater.from(this).inflate(R.layout.overlay_recommendations, null)
-            val txtTitle = view.findViewById<TextView>(R.id.txt_recommendation_title)
-            val txtSub = view.findViewById<TextView>(R.id.txt_recommendation_subtitle)
-            val btnClose = view.findViewById<View>(R.id.btn_close_recommendations)
-            val chip1 = view.findViewById<TextView>(R.id.chip_recommendation_1)
-            val chip2 = view.findViewById<TextView>(R.id.chip_recommendation_2)
-            val chip3 = view.findViewById<TextView>(R.id.chip_recommendation_3)
-
-            txtTitle?.text = title
-            if (!subtitle.isNullOrBlank()) {
-                txtSub?.text = subtitle
-                txtSub?.visibility = View.VISIBLE
-            }
-
-            btnClose?.setOnClickListener {
+            bindCard(view, title, subtitle, chips)
+            view.findViewById<View>(R.id.btn_close_recommendations)?.setOnClickListener {
                 hideRecommendations()
-            }
-
-            val chips = listOf(chip1, chip2, chip3)
-            chips.forEach { it?.visibility = View.GONE }
-
-            for (i in 0 until minOf(suggestions.size, chips.size)) {
-                val chip = chips[i] ?: continue
-                val text = suggestions[i]
-                chip.text = text
-                chip.visibility = View.VISIBLE
-                chip.setOnClickListener {
-                    val ok = ChatAccessibilityService.instance?.injectText(text) ?: false
-                    if (ok) {
-                        Toast.makeText(applicationContext, "Injected: $text", Toast.LENGTH_SHORT).show()
-                    }
-                    hideRecommendations()
-                }
             }
 
             val density = resources.displayMetrics.density
@@ -517,7 +517,7 @@ class OverlayService : Service() {
 
     fun hideRecommendations() {
         mainHandler.post {
-            lastShownSuggestions = emptyList()
+            lastShownChipLabels = emptyList()
             lastShownTitle = ""
             val wm = windowManager ?: return@post
             val view = recommendationView ?: return@post
@@ -909,9 +909,9 @@ class OverlayService : Service() {
             val draft = ChatAccessibilityService.instance?.readInputFieldText()
             IndicContextModule.instance?.emitActionTriggered("factcheck", draft)
         }
-        bindQuickActionButton(view.findViewById<View>(R.id.btn_icebreaker)) {
+        bindQuickActionButton(view.findViewById<View>(R.id.btn_smart_replies)) {
             val draft = ChatAccessibilityService.instance?.readInputFieldText()
-            IndicContextModule.instance?.emitActionTriggered("icebreaker", draft)
+            IndicContextModule.instance?.emitActionTriggered("smart_replies", draft)
         }
 
         // ── 3. Full Draggability for the Toolbar Background ──

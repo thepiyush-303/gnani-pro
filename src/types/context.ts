@@ -28,34 +28,10 @@ export type ToneOption = 'casual' | 'polite' | 'respectful' | 'informative';
 
 export type TemperatureLevel = 1 | 2 | 3 | 4 | 5;
 
-export type PersonaType =
-  | 'Boss'
-  | 'Client'
-  | 'Elder'
-  | 'Friend'
-  | 'Colleague'
-  | 'Auto';
-
 export type HinglishIntensity = 'pure_english' | 'light_hinglish' | 'deep_indic';
 
 /**
- * Tier 2: Per-Listener Context Profile
- * Stored locally and keyed by hashed threadId.
- */
-export interface ListenerContext {
-  threadId: string;
-  threadTitle: string;
-  persona: PersonaType;
-  formalityLevel: 1 | 2 | 3 | 4 | 5;
-  preferredLanguage?: string;
-  honorificRequired: boolean;
-  openAgreements: string[];
-  customNotes?: string;
-  lastSeenMs: number;
-}
-
-/**
- * Tier 3: Global User Persona & Communication Store
+ * Global user preferences (the USER's own style — not a contact category)
  */
 export interface GlobalUserPersona {
   userName: string;
@@ -114,47 +90,27 @@ export interface ThreadSummaryResult {
 }
 
 /**
- * Contextual Update Enhancement
+ * Smart Replies — 3 suggested next messages written as the user.
+ * tone / relationship / language are inferred by the LLM from the conversation.
  */
-export interface EnhancedUpdateResult {
-  enhancedDraft: string;
-  toneUsed: ToneOption;
-  contextReferences: string[];
+export interface SmartRepliesResult {
+  replies: string[];
+  tone: string;
+  relationship: string;
+  language: string;
 }
 
 /**
- * Context-Driven Icebreakers
+ * Improve Text — contextual rewrite of the user's draft.
  */
-export interface IcebreakerResult {
-  suggestions: string[];
-  category?: 'reconnect' | 'conversation_starter' | 'followup';
+export interface ImproveTextResult {
+  improved: string;
+  alternatives: string[];
+  tone: string;
+  relationship: string;
+  note: string;
+  /** false when the LLM judged the draft already natural for this conversation. */
+  wasModified: boolean;
 }
 
-/**
- * Concrete Persistent Thread Context Profile
- */
-export interface ThreadContextProfile {
-  threadId: string;
-  threadTitle: string;
-  persona: PersonaType;
-  formalityLevel: 1 | 2 | 3 | 4 | 5;
-  languageStyle: 'hinglish' | 'english' | 'hindi';
-  hinglishRatio: number;
-  sentimentTone: 'casual' | 'formal' | 'respectful' | 'friendly';
-  recentTopics: string[];
-  pendingQuestions: string[];
-  lastIncomingMessage?: string;
-  lastOutgoingMessage?: string;
-  messageCount: number;
-  lastUpdatedMs: number;
-}
-
-/**
- * Dynamic Smart Reply Recommendations
- */
-export interface SmartReplyResult {
-  suggestions: string[];
-  reason: string;
-  detectedTone: string;
-  languageUsed: string;
-}
+export type { ChatMessage, ChatPayload, Sender } from '../services/llm/chatPayload';

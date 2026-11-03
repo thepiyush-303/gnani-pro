@@ -44,9 +44,11 @@ export interface BufferUpdatedEvent {
   threadId?: string | null;
 }
 
+export type OverlayAction = 'improve' | 'factcheck' | 'smart_replies';
+
 export interface ActionTriggeredEvent {
-  /** The action triggered by the user on the floating toolbar */
-  action: 'improve' | 'factcheck' | 'icebreaker';
+  /** The action triggered by the user on the floating toolbar (or by the error card's Retry chip) */
+  action: OverlayAction;
   /** The text currently in the input field when the action was tapped */
   draftText?: string;
 }
@@ -212,6 +214,19 @@ export async function hideSmartReplies(): Promise<void> {
   return NativeModule.hideSmartReplies();
 }
 
+/**
+ * Shows the floating card as a notice/error (e.g. LLM unreachable, empty draft).
+ * With `retryAction`, a single "↻ Retry" chip re-emits `onActionTriggered` with
+ * that action and the current input text. Pass null for no Retry chip.
+ */
+export async function showAiError(
+  title: string,
+  message: string,
+  retryAction: OverlayAction | null,
+): Promise<void> {
+  return NativeModule.showAiError(title, message, retryAction);
+}
+
 // ─── Voice-to-Text & Gnani STT (Phase 3) ──────────────────────────────────────
 
 /**
@@ -334,7 +349,8 @@ export function addCopilotDisabledListener(
 }
 
 /**
- * Fires when an action button (Improve, Fact Check, Icebreaker) is tapped on the overlay toolbar.
+ * Fires when an action button (Improve, Fact Check, Smart Replies) is tapped on the overlay toolbar,
+ * or when the user taps Retry on an error card.
  */
 export function addActionTriggeredListener(
   listener: (event: ActionTriggeredEvent) => void,
@@ -356,6 +372,7 @@ const IndicContext = {
   readInputFieldText,
   showSmartReplies,
   hideSmartReplies,
+  showAiError,
   setGnaniConfig,
   getGnaniConfig,
   setLanguage,

@@ -272,6 +272,11 @@ class IndicContextModule : Module() {
             OverlayService.instance?.hideRecommendations()
             Unit
         }
+
+        AsyncFunction("showAiError") { title: String, message: String, retryAction: String? ->
+            OverlayService.instance?.showAiError(title, message, retryAction)
+            Unit
+        }
     }
 
     // ───────────────────────────────────────────────────────────────
