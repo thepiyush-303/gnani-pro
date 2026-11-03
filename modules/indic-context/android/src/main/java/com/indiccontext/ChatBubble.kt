@@ -25,6 +25,15 @@ data class ChatBubble(
 
     /** Package name of the host chat application, e.g. "com.whatsapp". */
     val appPackage: String,
+
+    /**
+     * Day the message was sent, `yyyy-MM-dd`, resolved from WhatsApp's date
+     * dividers / chat-list date at capture time. null = not determinable yet.
+     */
+    val sentDate: String? = null,
+
+    /** Time the message was sent, `HH:mm` (24h), from the bubble's time label. */
+    val sentTime: String? = null,
 ) {
     /**
      * Key used to line up on-screen messages with buffered ones when merging.

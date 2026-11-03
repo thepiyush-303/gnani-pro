@@ -47,6 +47,19 @@ const LLM_LABEL = (() => {
 })();
 import { getCleanFirstName } from '../src/utils/contactName';
 
+/** Local calendar day as yyyy-MM-dd (matches ChatBubble.sentDate). */
+function localIsoDay(d: Date = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** Overlay card header: a pending follow-up (something due/overdue) takes priority over tone info. */
+function smartRepliesCard(res: SmartRepliesResult, firstName: string, defaultTitle: string) {
+  return res.followUp
+    ? { title: `⏰ Follow up with ${firstName}`, subtitle: res.followUp }
+    : { title: defaultTitle, subtitle: describeInsight(res) };
+}
+
 /** "casual banter · close friends · Hinglish" — what the LLM inferred about the chat. */
 function describeInsight(r: { tone: string; relationship: string; language?: string }): string {
   return [r.tone, r.relationship, r.language].filter((x) => x && x !== 'unknown').join(' · ');
@@ -146,10 +159,13 @@ export default function DashboardScreen() {
   const [liveSmartReplies, setLiveSmartReplies] = useState<string[]>([]);
   /** LLM-inferred tone / relationship / language for the active chat. */
   const [liveInsight, setLiveInsight] = useState<string>('');
+  /** LLM-detected pending item for the active chat (e.g. a promise due today). */
+  const [liveFollowUp, setLiveFollowUp] = useState<string>('');
   const [isGeneratingReplies, setIsGeneratingReplies] = useState(false);
 
-  // References to debounce and prevent constant re-generation / flickering
-  const lastHandledMsgRef = useRef<string>('');
+  // Passive Smart Replies bookkeeping: run once per (chat, day, last message); drop stale results
+  const handledKeysRef = useRef<Set<string>>(new Set());
+  const latestKeyRef = useRef<string>('');
 
   // User's own global preferences
   const [globalPersona, setGlobalPersona] = useState<GlobalUserPersona | null>(null);
@@ -191,25 +207,32 @@ export default function DashboardScreen() {
       setCurrentBuffer(bubbles);
       if (threadTitle) setActiveThreadTitle(threadTitle);
 
-      // ── Passive Smart Replies: only when the newest *attributed* message is from the contact ──
+      // ── Passive Smart Replies ──
+      // Fire when (a) the newest attributed message is from the contact, or
+      // (b) the chat is reopened on a later day than its last message — so a
+      //     promise like "kal details bhejta hu" gets followed up the next day.
       const lastAttributed = [...bubbles].reverse().find((b) => b.isSelf === true || b.isSelf === false);
-      if (!lastAttributed || lastAttributed.isSelf !== false) return;
+      if (!lastAttributed) return;
+      const today = localIsoDay();
+      const isIncoming = lastAttributed.isSelf === false;
+      const isFromEarlierDay = !!lastAttributed.sentDate && lastAttributed.sentDate < today;
+      if (!isIncoming && !isFromEarlierDay) return;
 
-      const msgKey = `${threadId ?? ''}:${lastAttributed.text.trim()}`;
-      if (msgKey === lastHandledMsgRef.current) return;
-      lastHandledMsgRef.current = msgKey;
+      const msgKey = `${threadId ?? ''}|${today}|${lastAttributed.text.trim()}`;
+      latestKeyRef.current = msgKey;
+      if (handledKeysRef.current.has(msgKey)) return;
+      handledKeysRef.current.add(msgKey);
+      if (handledKeysRef.current.size > 200) handledKeysRef.current.clear();
 
       try {
         const res = await generateSmartReplies(bubbles, threadTitle);
-        // A newer message may have arrived while we were waiting — drop stale results
-        if (lastHandledMsgRef.current !== msgKey || res.replies.length === 0) return;
+        // A newer message / another chat may have come up while we were waiting — drop stale results
+        if (latestKeyRef.current !== msgKey || res.replies.length === 0) return;
         setLiveSmartReplies(res.replies);
         setLiveInsight(describeInsight(res));
-        await IndicContext.showSmartReplies(
-          `💬 Reply to ${getCleanFirstName(threadTitle)}`,
-          describeInsight(res),
-          res.replies,
-        );
+        setLiveFollowUp(res.followUp);
+        const card = smartRepliesCard(res, getCleanFirstName(threadTitle), `💬 Reply to ${getCleanFirstName(threadTitle)}`);
+        await IndicContext.showSmartReplies(card.title, card.subtitle, res.replies);
       } catch (e) {
         // Passive suggestions never show an error card — just log why.
         console.warn('[SmartReplies] auto generation failed:', isLlmError(e) ? `${e.kind} ${e.message}` : e);
@@ -291,9 +314,11 @@ export default function DashboardScreen() {
             );
             return;
           }
-          await IndicContext.showSmartReplies(`💬 Smart Replies for ${firstName}`, describeInsight(res), res.replies);
+          const card = smartRepliesCard(res, firstName, `💬 Smart Replies for ${firstName}`);
+          await IndicContext.showSmartReplies(card.title, card.subtitle, res.replies);
           setLiveSmartReplies(res.replies);
           setLiveInsight(describeInsight(res));
+          setLiveFollowUp(res.followUp);
         } else if (action === 'factcheck') {
           if (!rawDraft) {
             await IndicContext.showAiError('🔍 Fact Check', 'Type a message in the chat first, then tap 🔍.', null);
@@ -512,12 +537,11 @@ export default function DashboardScreen() {
       const res = await generateSmartReplies(await getLiveBuffer(), activeThreadTitle);
       setLiveSmartReplies(res.replies);
       setLiveInsight(describeInsight(res));
+      setLiveFollowUp(res.followUp);
       if (res.replies.length > 0) {
-        await IndicContext.showSmartReplies(
-          `💬 Smart Replies for ${getCleanFirstName(activeThreadTitle)}`,
-          describeInsight(res),
-          res.replies,
-        );
+        const name = getCleanFirstName(activeThreadTitle);
+        const card = smartRepliesCard(res, name, `💬 Smart Replies for ${name}`);
+        await IndicContext.showSmartReplies(card.title, card.subtitle, res.replies);
       }
     } catch (e: unknown) {
       Alert.alert('Smart Replies Error', describeLlmError(e));
@@ -747,6 +771,13 @@ export default function DashboardScreen() {
           </TouchableOpacity>
         </View>
 
+        {liveFollowUp ? (
+          <View style={styles.suggestedBox}>
+            <Text style={styles.suggestedLabel}>⏰ Pending follow-up</Text>
+            <Text style={styles.suggestedText}>{liveFollowUp}</Text>
+          </View>
+        ) : null}
+
         {liveSmartReplies.length > 0 ? (
           <View style={styles.recommendationsList}>
             {liveSmartReplies.map((reply, idx) => (
@@ -912,6 +943,9 @@ export default function DashboardScreen() {
           <View style={[styles.testResultCard, styles.testResultCardSuccess]}>
             <Text style={styles.resultTitle}>💬 Smart Replies</Text>
             <Text style={styles.resultSub}>{describeInsight(testRepliesResult)}</Text>
+            {testRepliesResult.followUp ? (
+              <Text style={styles.resultDetail}>⏰ {testRepliesResult.followUp}</Text>
+            ) : null}
             {testRepliesResult.replies.map((s, i) => (
               <TouchableOpacity
                 key={i}

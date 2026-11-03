@@ -48,7 +48,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **TypeScript Source (`src/`)**
    - `src/services/llm/`: the LLM layer. **All** AI features go through it:
      - `llmClient.ts`: the single HTTP client (shared time budget, typed `LlmError`, JSON extraction). Its provider is chosen by `EXPO_PUBLIC_LLM_PROVIDER=gemini|evon`; the default is Gemini `gemini-3.5-flash-lite` via `EXPO_PUBLIC_GEMINI_API_KEY` / `EXPO_PUBLIC_GEMINI_MODEL`. Evon uses `EXPO_PUBLIC_EVON_*`. See `.env.example`, and restart Metro with `--clear` after changing `.env`.
-     - `chatPayload.ts`: `buildChatPayload()` turns buffer bubbles into `{contact_name, conversation: [{sender: "user"|"contact", text}], draft?}`. Bubbles whose sender is unknown are dropped.
+     - `chatPayload.ts`: `buildChatPayload()` turns buffer bubbles into `{now, contact_name, conversation: [{sender: "user"|"contact", text, sent?}], draft?}`. Bubbles whose sender is unknown are dropped. `sent` looks like `"2026-11-02 18:20 (Mon, yesterday)"`, so the LLM can tell what is due or overdue.
      - `prompts.ts`: the system prompts. No relationship/persona is ever passed in; the LLM infers it from the conversation.
    - `src/services/aiFeatures.ts`: `generateSmartReplies()` and `improveText()`.
    - `src/services/gnaniEvonLlm.ts`: Tone Guard, Fact Check, Catch-Up Summary.
@@ -71,6 +71,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - `ChatAccessibilityService` monitors accessibility events in supported apps.
    - Captures chat bubbles (text, sender, timestamp, app package) into a session buffer. WhatsApp messages come from `message_text` nodes. A row with the delivery-tick `status` view is outgoing (`isSelf = true`); otherwise the sender is decided from the bubble's left/right gap, and an ambiguous bubble stays `null`.
    - `SessionBuffer.mergeVisible()` keeps on-screen chronological order (handles scrolling up).
+   - Each bubble carries `sentDate` (`yyyy-MM-dd`) and `sentTime` (`HH:mm`). The day comes from `conversation_row_date_divider` rows; if no divider is on screen, the chat-list `conversations_row_date` gives the day of the last message. `ChatDates.kt` parses the labels; tests: `cd android && ./gradlew :indic-context:testDebugUnitTest`.
    - Buffer updates are emitted to JS via `IndicContextModule.emitBufferUpdated()`.
    - Dashboard displays buffer count and uses buffer for AI features.
 

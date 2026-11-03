@@ -14,6 +14,10 @@ export interface ChatBubble {
   nodeClassName?: string | null;
   /** Package name of the host app (e.g. com.whatsapp, org.telegram.messenger) */
   appPackage: string;
+  /** Day the message was sent (yyyy-MM-dd), from WhatsApp date dividers; null if unknown */
+  sentDate?: string | null;
+  /** Time the message was sent (HH:mm, 24h), from the bubble's time label; null if unknown */
+  sentTime?: string | null;
 }
 
 export interface SessionBufferState {
@@ -95,6 +99,12 @@ export interface ThreadSummaryResult {
  */
 export interface SmartRepliesResult {
   replies: string[];
+  /**
+   * One short line about something due / overdue / pending as of now
+   * (e.g. "Rahul said yesterday he'd send the details today, not received yet").
+   * Empty when nothing is pending.
+   */
+  followUp: string;
   tone: string;
   relationship: string;
   language: string;

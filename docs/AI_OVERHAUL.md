@@ -34,19 +34,35 @@ This is the working document for the AI-feature overhaul. It records **what was 
    - strip "bhai/yaar/bro" when nobody in the conversation uses them;
    - if every Improve option is rejected, keep the user's draft unchanged.
 
+8. **Date-aware context** (added 2026-11-03). Every message carries when it was sent, and the payload carries `now`. The LLM reads the chat as a timeline, so a promise made yesterday "for tomorrow" is due today and gets followed up. Smart Replies return a structured `follow_up` (`due_today` / `overdue` / `unanswered_question` / `none`), shown on the overlay card as "⏰ Follow up with X".
+
 ## 3. Payload contract
 
 ```jsonc
 // user turn sent to the LLM (JSON.stringify'd)
 {
+  "now": "2026-11-03 11:00 (Tue)",   // user's local time
   "contact_name": "Ashmit",          // or null; context only
   "conversation": [                  // oldest → newest, max 15
-    { "sender": "contact", "text": "kal chess khelega?" },
-    { "sender": "user",    "text": "haan pakka" }
+    { "sender": "contact", "text": "kal subah tak bhej dunga", "sent": "2026-11-02 18:20 (Mon, yesterday)" },
+    { "sender": "user",    "text": "ok", "sent": "18:21 (date unknown)" },  // day not resolvable
+    { "sender": "user",    "text": "haan pakka" }                           // nothing known → no "sent"
   ],
-  "draft": "i can play chess tomorrow morning"   // Improve Text only
+  "draft": "i can play chess tomorrow morning"   // draft-based features only
 }
 ```
+
+### How message dates are captured (WhatsApp 2.26, verified on device RMX3785 via a redacted `uiautomator dump`)
+
+| Signal | View | Used for |
+|--------|------|----------|
+| Per-message time | `date` inside the row (`"20:56"`; 12h on other locales) | `sentTime` (normalised to `HH:mm`) |
+| Day divider | `conversation_row_date_divider` inside the **first row of each day** (`"Yesterday"`, `"1 October 2026"`) | `sentDate` for that row and all rows below it on screen |
+| Chat-list date | `conversations_row_date` next to `conversations_row_contact_name` (`"21:43"` = today) | Day of the chat's **last** message. Used when no divider is on screen and the list is scrolled to the bottom (trusted for 10 min after the list was seen) |
+| Outgoing | `status` (ticks) in the row, outside any `quoted_*` container | `isSelf = true` |
+| Captions | `caption` (image/video rows) | captured like `message_text` |
+
+Day resolution happens on-device at capture time (`ChatDates.kt`, JVM unit-tested). It handles Today/Yesterday/weekday names/absolute dates/year-less dates and Hindi आज/कल. Rows above the first visible divider stay undated, unless the session buffer already knows them or they were appended below a dated message (inherited).
 
 Source of truth: `src/services/llm/chatPayload.ts` (builder) and `src/services/llm/prompts.ts` (system prompts).
 
@@ -87,6 +103,17 @@ Source of truth: `src/services/llm/chatPayload.ts` (builder) and `src/services/l
 - [x] Auto smart replies use the same feature
 - [x] Persona picker and badge removed; the Icebreakers card is merged into Smart Replies; test panel updated
 
+### Phase 8: Date-aware context
+- [x] Confirm WhatsApp view IDs on a real device (redacted dump): `message_text`, `caption`, `date`, `status`, `conversation_row_date_divider`, `conversations_row_date`, `android:id/list`
+- [x] `ChatDates.kt` (day/time label parsing) + `ChatDatesTest` (7 JVM tests)
+- [x] Row-based capture with `sentDate`/`sentTime`; chat-list anchor; date inheritance in `SessionBuffer`
+- [x] **Bug fix:** the chat-list screen was being scraped as "messages" by the geometry fallback; WhatsApp now captures only on conversation screens
+- [x] Payload `now` + per-message `sent`; `TIME_RULES` in all prompts; structured `follow_up`
+- [x] Passive Smart Replies also fire once per day when a chat is reopened after its last message's day
+- [x] Overlay card "⏰ Follow up with X" + dashboard "Pending follow-up"
+- [x] Eval: due next morning / not due yet / already kept / 4-day-old plan / stale "kal" draft (see log)
+- [ ] On device: open a chat the day after a "kal bhej dunga" message and check the card
+
 ### Phase 7: Verification
 - [x] `npx tsc --noEmit`
 - [x] `scripts/evalPrompts.ts` written; client plumbing verified against a local stub
@@ -126,3 +153,20 @@ _(append results here: date, what was run, outcome)_
   - Kept flash-lite as requested. Switch with `EXPO_PUBLIC_GEMINI_MODEL=gemini-3.5-flash` if correctness matters more than speed.
 - Final full eval: ✅ all checks passed. Latency is 1–2 s for most calls (5 s worst).
 - **Watch:** the free-tier rate limit (429) was hit after ~12 calls in about a minute. Passive auto-replies fire on every incoming message, so a fast chat can hit it; the error is logged and no card is shown.
+
+**2026-11-03: Date-aware context**
+- Device check (RMX3785, WhatsApp 2.26, redacted `uiautomator dump`): confirmed `message_text`, `caption`, `date`, `status`, `conversation_row_date_divider` (inside the first row of each day), `conversations_row_contact_name` / `conversations_row_date` (chat list), `android:id/list`. Labels seen: "Yesterday", "1 October 2026", times "20:56".
+- `./gradlew :indic-context:testDebugUnitTest`: ✅ `ChatDatesTest` 7/7.
+- Eval iterations on the time cases:
+  1. Free-text `follow_up`: it restated a promise that wasn't due yet, and reported delivered items as follow-ups.
+  2. Classified `follow_up` (`status`): the model's note reasoned mid-sentence ("…wait, so it's not due yet!") yet still marked it due. **Lesson: don't let the LLM compare dates.**
+  3. **Extraction + code** (`item`, resolved `due_date`, `done`; the app compares `due_date` with today): ✅ due / not-due / kept are all correct.
+- Two more bugs found by the eval:
+  - With `low` thinking, Gemini's thinking tokens consumed the 500-token output cap, so the JSON came back truncated. Fix: the cap now adds headroom for thinking, and `MAX_TOKENS` is logged.
+  - The day-word guard kept the boss draft *unimproved* because every option said "Sunday". Fix: one corrective retry that names the rejected options. The retry then produced "I'm available for chess tomorrow morning, if that works for you."
+- Stale chats: added `since_last_message` and a "resuming an old chat" rule. The eval now fails any "today/tomorrow/aaj/kal" in replies to a 4-day-old plan.
+- Final paced run (`EVAL_PACE_MS=4500`): ✅ **all checks passed.**
+- Known weak spots (flash-lite, not caught by checks):
+  - occasional invented specifics (the shop name "TechFix");
+  - for a 4-day-old plan, one reply assumed it was missed ("Sorry I missed our meet up"), and the replies switched to English in a mixed chat.
+  - `gemini-3.5-flash` is the lever if these matter.

@@ -235,6 +235,8 @@ class IndicContextModule : Module() {
                     "capturedAtMs"  to b.capturedAtMs,
                     "nodeClassName" to b.nodeClassName,
                     "appPackage"    to b.appPackage,
+                    "sentDate"      to b.sentDate,
+                    "sentTime"      to b.sentTime,
                 )
             }
         }
@@ -297,6 +299,8 @@ class IndicContextModule : Module() {
                             "capturedAtMs"  to b.capturedAtMs,
                             "nodeClassName" to b.nodeClassName,
                             "appPackage"    to b.appPackage,
+                            "sentDate"      to b.sentDate,
+                            "sentTime"      to b.sentTime,
                         )
                     }
                 )

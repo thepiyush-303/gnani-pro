@@ -644,62 +644,183 @@ class ChatAccessibilityService : AccessibilityService() {
     // ───────────────────────────────────────────────────────────────
 
     /** A message visible on screen in this capture pass. */
-    private data class VisibleMessage(val text: String, val isSelf: Boolean?, val top: Int, val cls: String)
+    private data class VisibleMessage(
+        val text: String,
+        val isSelf: Boolean?,
+        val top: Int,
+        val cls: String,
+        val sentDate: String? = null,
+        val sentTime: String? = null,
+    )
+
+    private fun isWhatsApp(pkg: String) = pkg == "com.whatsapp" || pkg == "com.whatsapp.w4b"
+
+    /**
+     * Last-message day of each chat, read from WhatsApp's chat list
+     * (`conversations_row_date`: "21:43" = today, "Yesterday", "1 October 2026").
+     * Used to date the bottom of a chat when no date divider is on screen.
+     */
+    private data class ChatListDay(val dayIso: String, val capturedAtMs: Long)
+    private val chatListDays = object : LinkedHashMap<String, ChatListDay>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ChatListDay>?) = size > 300
+    }
+    /** The chat-list anchor is only trusted if read shortly before the chat was opened. */
+    private val CHAT_LIST_ANCHOR_TTL_MS = 10 * 60 * 1000L
 
     /**
      * Captures the messages currently on screen, in on-screen order, with a
-     * resolved sender, and merges them into the session buffer.
+     * resolved sender and send date/time, and merges them into the session buffer.
      *
      * Sender resolution (strict — unresolved stays null and is dropped in JS):
-     *  1. WhatsApp: `message_text` nodes; a row containing the delivery-tick
-     *     `status` view is outgoing (isSelf = true).
+     *  1. WhatsApp: a row containing the delivery-tick `status` view is outgoing.
      *  2. Otherwise: bubble-container geometry (left gap vs right gap).
      *
-     * @return number of buffer changes (added or re-attributed messages).
+     * Date resolution (WhatsApp):
+     *  1. `conversation_row_date_divider` inside a row starts a new day for that row and below.
+     *  2. No divider on screen + list scrolled to the bottom → the chat-list date of this chat.
+     *  3. Otherwise SessionBuffer inherits from the message above when appending.
+     *
+     * @return number of buffer changes (added or updated messages).
      */
     private fun walkAndCapture(root: AccessibilityNodeInfo, pkg: String): Int {
-        var visible = collectWhatsAppMessages(root, pkg)
-        if (visible.isEmpty()) visible = collectByGeometry(root, pkg)
+        val visible: List<VisibleMessage> = if (isWhatsApp(pkg)) {
+            val conv = collectWhatsAppConversation(root, pkg)
+            if (conv == null) {
+                // Not a conversation screen (chat list, settings, …): never scrape it as messages.
+                recordChatListDays(root, pkg)
+                return 0
+            }
+            conv
+        } else {
+            collectByGeometry(root, pkg)
+        }
         if (visible.isEmpty()) return 0
 
         val ordered = visible.sortedBy { it.top }
         for (m in ordered) {
             val tag = when (m.isSelf) { true -> "user"; false -> "contact"; null -> "?" }
-            Log.d(TAG, "capture [$tag] ${m.text.take(40)}")
+            Log.d(TAG, "capture [$tag] [${m.sentDate ?: "?"} ${m.sentTime ?: "?"}] ${m.text.take(40)}")
         }
         return buffer.mergeVisible(ordered.map {
-            ChatBubble(text = it.text, isSelf = it.isSelf, nodeClassName = it.cls, appPackage = pkg)
+            ChatBubble(
+                text = it.text, isSelf = it.isSelf, nodeClassName = it.cls, appPackage = pkg,
+                sentDate = it.sentDate, sentTime = it.sentTime,
+            )
         })
     }
 
-    private fun collectWhatsAppMessages(root: AccessibilityNodeInfo, pkg: String): List<VisibleMessage> {
-        if (pkg != "com.whatsapp" && pkg != "com.whatsapp.w4b") return emptyList()
-        val nodes = try {
-            root.findAccessibilityNodeInfosByViewId("$pkg:id/message_text")
-        } catch (e: Exception) { null } ?: return emptyList()
+    /** Records each chat-list row's last-message day, keyed by the contact/group name. */
+    private fun recordChatListDays(root: AccessibilityNodeInfo, pkg: String) {
+        val names = try { root.findAccessibilityNodeInfosByViewId("$pkg:id/conversations_row_contact_name") } catch (e: Exception) { null }
+        if (names.isNullOrEmpty()) return
+        val now = System.currentTimeMillis()
+        for (nameNode in names) {
+            try {
+                val name = nameNode.text?.toString()?.trim().orEmpty()
+                if (name.isEmpty()) continue
+                // name → header row → row content; the date sits in the header row next to the name
+                val chain = ancestors(nameNode, 4)
+                try {
+                    val label = chain.asSequence()
+                        .mapNotNull { a -> firstText(a, "$pkg:id/conversations_row_date") }
+                        .firstOrNull()
+                    ChatDates.resolveDayLabel(label, now)?.let { chatListDays[name] = ChatListDay(it, now) }
+                } finally {
+                    chain.forEach { safeRecycle(it) }
+                }
+            } finally {
+                safeRecycle(nameNode)
+            }
+        }
+    }
+
+    private fun firstText(node: AccessibilityNodeInfo, viewId: String): String? {
+        val found = try { node.findAccessibilityNodeInfosByViewId(viewId) } catch (e: Exception) { null } ?: return null
+        val text = found.firstOrNull()?.text?.toString()?.trim()
+        found.forEach { safeRecycle(it) }
+        return text?.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * Row-based capture of an open WhatsApp conversation (verified on WhatsApp 2.26:
+     * `android:id/list` › `conversation_row_*` rows › `message_text` / `caption`,
+     * `date` (time), `status` (outgoing only), `conversation_row_date_divider`).
+     * Returns null when the screen is not a conversation.
+     */
+    private fun collectWhatsAppConversation(root: AccessibilityNodeInfo, pkg: String): List<VisibleMessage>? {
+        val header = try { root.findAccessibilityNodeInfosByViewId("$pkg:id/conversation_contact_name") } catch (e: Exception) { null }
+        val isConversation = !header.isNullOrEmpty()
+        header?.forEach { safeRecycle(it) }
+        if (!isConversation) return null
+
+        val lists = try { root.findAccessibilityNodeInfosByViewId("android:id/list") } catch (e: Exception) { null } ?: return emptyList()
+        val list = lists.firstOrNull { isListContainer(it) }
+        lists.forEach { if (it !== list) safeRecycle(it) }
+        if (list == null) return emptyList()
+
+        val now = System.currentTimeMillis()
+        val out = ArrayList<VisibleMessage>()
+        var sawDivider = false
+        var currentDay: String? = null
+        val atBottom = try {
+            list.actionList.none { it.id == AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD.id }
+        } catch (e: Exception) { false }
+
+        try {
+            for (i in 0 until list.childCount) {
+                val row = list.getChild(i) ?: continue
+                try {
+                    firstText(row, "$pkg:id/conversation_row_date_divider")?.let { label ->
+                        sawDivider = true
+                        currentDay = ChatDates.resolveDayLabel(label, now)
+                    }
+                    out.addAll(collectRowMessages(row, pkg, currentDay))
+                } finally {
+                    safeRecycle(row)
+                }
+            }
+        } finally {
+            safeRecycle(list)
+        }
+
+        // No divider on screen at all and we're at the newest message: everything visible
+        // is from the same day as the chat's last message, which the chat list told us.
+        if (!sawDivider && atBottom && out.isNotEmpty()) {
+            val anchor = activeThreadTitle?.let { chatListDays[it] }
+                ?.takeIf { now - it.capturedAtMs < CHAT_LIST_ANCHOR_TTL_MS }
+            if (anchor != null) {
+                Log.d(TAG, "dating visible messages from chat list: ${anchor.dayIso}")
+                return out.map { it.copy(sentDate = anchor.dayIso) }
+            }
+        }
+        return out
+    }
+
+    private fun collectRowMessages(row: AccessibilityNodeInfo, pkg: String, day: String?): List<VisibleMessage> {
+        val nodes = ArrayList<AccessibilityNodeInfo>()
+        for (id in arrayOf("message_text", "caption")) {
+            try { row.findAccessibilityNodeInfosByViewId("$pkg:id/$id") } catch (e: Exception) { null }?.let { nodes.addAll(it) }
+        }
+        if (nodes.isEmpty()) return emptyList()
 
         val out = ArrayList<VisibleMessage>()
         val bounds = Rect()
+        // Row-level facts (a row is one message bubble)
+        val isOutgoing = hasViewIdOutsideQuote(row, "$pkg:id/status")
+        val time = textOutsideQuote(row, "$pkg:id/date")?.let { ChatDates.normalizeTime(it) }
+
         for (node in nodes) {
             try {
                 val text = node.text?.toString()?.trim().orEmpty()
                 if (text.isEmpty() || isMessagePlaceholder(text)) continue
                 node.getBoundsInScreen(bounds)
                 if (bounds.height() <= 0) continue
-
-                val chain = ancestors(node, 10)
+                val chain = ancestorsUntil(node, row)
                 try {
-                    val rowIdx = chain.indexOfFirst { isListContainer(it) } - 1
-                    val below = if (rowIdx >= 0) chain.subList(0, rowIdx) else chain
                     // Quoted-reply snippets live inside a "quoted…" container — not a message of their own
-                    if (below.any { it.viewIdResourceName?.contains("quoted", ignoreCase = true) == true }) continue
-
-                    val row = if (rowIdx >= 0) chain[rowIdx] else null
-                    val isSelf = when {
-                        row != null && hasViewId(row, "$pkg:id/status") -> true
-                        else -> senderFromGeometry(node, below)
-                    }
-                    out.add(VisibleMessage(text, isSelf, bounds.top, node.className?.toString() ?: ""))
+                    if (chain.any { isQuoteContainer(it) }) continue
+                    val isSelf = if (isOutgoing) true else senderFromGeometry(node, chain)
+                    out.add(VisibleMessage(text, isSelf, bounds.top, node.className?.toString() ?: "", day, time))
                 } finally {
                     chain.forEach { safeRecycle(it) }
                 }
@@ -709,6 +830,42 @@ class ChatAccessibilityService : AccessibilityService() {
         }
         return out
     }
+
+    private fun isQuoteContainer(n: AccessibilityNodeInfo) =
+        n.viewIdResourceName?.contains("quoted", ignoreCase = true) == true
+
+    /** Ancestors of [node] strictly below [stop] (nearest first). */
+    private fun ancestorsUntil(node: AccessibilityNodeInfo, stop: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
+        val out = ArrayList<AccessibilityNodeInfo>()
+        var cur = try { node.parent } catch (e: Exception) { null }
+        while (cur != null && cur != stop && out.size < 12) {
+            out.add(cur)
+            cur = try { cur.parent } catch (e: Exception) { null }
+        }
+        cur?.let { safeRecycle(it) }
+        return out
+    }
+
+    private fun matchesOutsideQuote(row: AccessibilityNodeInfo, viewId: String): AccessibilityNodeInfo? {
+        val found = try { row.findAccessibilityNodeInfosByViewId(viewId) } catch (e: Exception) { null } ?: return null
+        var hit: AccessibilityNodeInfo? = null
+        for (n in found) {
+            if (hit == null) {
+                val chain = ancestorsUntil(n, row)
+                val quoted = chain.any { isQuoteContainer(it) }
+                chain.forEach { safeRecycle(it) }
+                if (!quoted) { hit = n; continue }
+            }
+            safeRecycle(n)
+        }
+        return hit
+    }
+
+    private fun hasViewIdOutsideQuote(row: AccessibilityNodeInfo, viewId: String): Boolean =
+        matchesOutsideQuote(row, viewId)?.also { safeRecycle(it) } != null
+
+    private fun textOutsideQuote(row: AccessibilityNodeInfo, viewId: String): String? =
+        matchesOutsideQuote(row, viewId)?.let { n -> n.text?.toString().also { safeRecycle(n) } }
 
     /** Fallback for apps/versions where message view IDs are unknown. */
     private fun collectByGeometry(root: AccessibilityNodeInfo, pkg: String): List<VisibleMessage> {
@@ -777,13 +934,6 @@ class ChatAccessibilityService : AccessibilityService() {
     private fun isListContainer(n: AccessibilityNodeInfo): Boolean {
         val cls = n.className?.toString() ?: ""
         return cls.endsWith("RecyclerView") || cls.endsWith("ListView") || n.viewIdResourceName == "android:id/list"
-    }
-
-    private fun hasViewId(n: AccessibilityNodeInfo, viewId: String): Boolean {
-        val found = try { n.findAccessibilityNodeInfosByViewId(viewId) } catch (e: Exception) { null }
-        val hit = !found.isNullOrEmpty()
-        found?.forEach { safeRecycle(it) }
-        return hit
     }
 
     private fun safeRecycle(n: AccessibilityNodeInfo) {

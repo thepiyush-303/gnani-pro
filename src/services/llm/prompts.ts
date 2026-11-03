@@ -7,10 +7,20 @@
  */
 
 const PAYLOAD_PREAMBLE = `INPUT (JSON):
-{"contact_name": string|null, "conversation": [{"sender": "user"|"contact", "text": string}, ...]__DRAFT__}
+{"now": string, "since_last_message"?: string, "contact_name": string|null, "conversation": [{"sender": "user"|"contact", "text": string, "sent"?: string}, ...]__DRAFT__}
 - "conversation" is ordered oldest → newest.
 - sender "user" = the person using this assistant. sender "contact" = the person they are talking TO.
-- Never mix these up.`;
+- Never mix these up.
+- "now" is the user's current local date and time. "since_last_message" is how long ago the newest message was sent. "sent" is when a message was sent, with its weekday and how long ago, e.g. "2026-11-02 20:56 (Mon, yesterday)". It may be missing or say "date unknown".`;
+
+/** Shared rules for reading the conversation as a timeline. */
+const TIME_RULES = `TIME AWARENESS
+- Read the conversation as a timeline against "now". Messages from earlier days are history, not a live exchange.
+- Relative words inside a message are relative to THAT message's "sent" day, not to "now": "kal/tomorrow" sent yesterday means TODAY; "aaj/today" sent yesterday means YESTERDAY. ("kal" means yesterday or tomorrow; decide from the tense.)
+- Track commitments: if someone promised something for a day that is now today or already past, check whether a later message shows it was done. If not, it is due or overdue.
+- If plans in the chat were for a time that has already passed, do not talk about them as still upcoming. If later messages don't say how it went, do not assume it happened, was missed or was cancelled. At most ask casually how it went. Refer to it by its real day ("Friday wala plan"), never as "kal" unless it really was yesterday.
+- If "since_last_message" is a day or more, the user is RESUMING an old chat. Do not reply as if the last message just arrived, and never treat its plans as today/tomorrow. Either follow up on what is still open, ask how a past plan went, or restart the topic naturally.
+- If "sent" is missing, do not guess dates.`;
 
 function preamble(withDraft: boolean): string {
   return PAYLOAD_PREAMBLE.replace('__DRAFT__', withDraft ? ', "draft": string' : '');
@@ -28,9 +38,13 @@ STEP 1: READ THE ROOM (silently, do not output your reasoning)
 - Tone: e.g. abusive-friendly banter, very informal, casual, warm, polite, formal/professional, respectful-to-elder, urgent, tense/upset.
 - Language and script: decide from the actual words in the USER's own messages (and the contact's latest message). If they write in English, the chat is English, even between Indian friends. Only call it Hinglish if the user actually writes Hindi words in Roman script. Also learn the user's style: spellings ("h" for "hai", "kr", "ni", "bhi"), casing, punctuation, emoji habits, typical length.
 - Open threads: the last thing said, unanswered questions, plans being made, anything the user still owes a reply to.
+- Timeline: how long ago the last message was, and anything promised by either side that is due today or overdue as of "now" (see TIME AWARENESS).
+
+${TIME_RULES}
 
 STEP 2: WRITE EXACTLY 3 MESSAGES THE USER WOULD NATURALLY SEND NEXT
-1. If the last message is from the contact, respond to it directly and specifically.
+0. If something is due today or overdue (e.g. the contact said yesterday "kal details bhej dunga" and nothing came since), the replies should follow up on it naturally, in the chat's tone (e.g. a nudge or reminder). Do not answer old messages as if they were just sent.
+1. If the last message is from the contact (and is recent), respond to it directly and specifically.
    If the last message is from the user, write a natural continuation, nudge, or related follow-up. Do not reply to the user's own message as if someone else sent it.
 2. Write like the user, not like an assistant. Copy their language, script, slang, spelling and message length. If they write "kr diya h", do not write "Haan, maine kar diya hai."
 3. Mirror the register exactly. Never make it more formal or more casual than the chat already is. If they swear at each other affectionately, you may too. If they are formal, stay formal.
@@ -47,9 +61,19 @@ STEP 3: CHECK EACH MESSAGE BEFORE ANSWERING, and rewrite any that fail:
 - Does it use a filler/address word ("bhai", "yaar", "bro", "ji", "sir") that the user has NOT used in this conversation? Remove it.
 - Does it state a time, place, name or fact that is not in the conversation? Remove it or turn it into a question.
 - Is it a clean, natural sentence a real person would send (no garbled or half-translated words)?
+- Does it make sense at "now"? (No "see you tomorrow" for a plan that was yesterday.)
+
+"follow_up": the most recent PROMISE or REQUEST in the conversation that has a deadline (e.g. "kal subah tak bhej dunga", "send it by Friday"), or null if there is none. Fill the fields in this order:
+- "item": what is owed, e.g. "send the project details".
+- "owed_by": "contact" or "user".
+- "said_in_message_sent": copy the "sent" value of the message containing the promise (or "unknown").
+- "due_date": the deadline as yyyy-MM-dd, resolving relative words against THAT message's sent day ("kal" sent on 2026-11-02 → "2026-11-03"). Use null if it can't be resolved.
+- "done": true if a LATER message shows it was delivered or done.
+- "note": ONE short line in English for the user, e.g. "Rahul said yesterday he'd send the details by this morning; nothing received yet."
+Do not decide whether it is due; the app compares due_date with "now".
 
 OUTPUT: only this JSON object, with no markdown and no extra text:
-{"tone": "<2-5 words>", "relationship": "<2-5 words, inferred>", "language": "<e.g. English | Hinglish (Roman script) | Hindi (Devanagari)>", "replies": ["<msg 1>", "<msg 2>", "<msg 3>"]}`;
+{"tone": "<2-5 words>", "relationship": "<2-5 words, inferred>", "language": "<e.g. English | Hinglish (Roman script) | Hindi (Devanagari)>", "follow_up": {"item": "...", "owed_by": "contact"|"user", "said_in_message_sent": "...", "due_date": "yyyy-MM-dd"|null, "done": boolean, "note": "..."} | null, "replies": ["<msg 1>", "<msg 2>", "<msg 3>"]}`;
 
 // ─── Improve Text ────────────────────────────────────────────────────────────
 
@@ -59,6 +83,11 @@ ${preamble(true)}
 - "user" wrote the draft. "contact" will receive it.
 
 SILENTLY INFER from the conversation (NOT from the contact's name): the relationship, the tone, the language/script, and the user's own writing style.
+
+${TIME_RULES}
+- Use the timeline only to understand what the draft refers to. Never change the draft's own time words because of it. If the draft conflicts with the timeline, keep it and say so plainly in "note".
+  e.g. the user promised yesterday "kal tak bhej dunga" (due today) and the draft is "kal bhej dunga"
+    → note: "Heads-up: you promised this for today; this pushes it to tomorrow."
 
 REWRITE RULES
 1. Preserve the meaning exactly. Keep every fact, time, day, quantity, name and commitment. Never add new facts, promises or plans.
@@ -113,7 +142,10 @@ Look for:
 1. Time/date contradictions (e.g. agreed on 4 PM earlier, draft says 2 PM).
 2. Number, price, quantity or place discrepancies.
 3. The draft contradicting something the user themselves said or agreed to earlier.
+4. Time words that conflict once you account for WHEN each message was sent (e.g. contact said yesterday "kal 5 baje", i.e. today 5 PM; the draft says "kal 5 baje", i.e. tomorrow).
 Only report real conflicts with text that is actually in the conversation. Do not invent earlier statements.
+
+${TIME_RULES}
 
 OUTPUT: only this JSON object, with no markdown and no extra text:
 {"hasConflict": boolean, "inconsistencies": [{"statement": "<from draft>", "earlierStatement": "<quoted from conversation, prefixed with who said it>", "explanation": "..."}], "suggestedCorrection": "<corrected draft, or the draft unchanged>"}`;
@@ -124,6 +156,9 @@ export const SUMMARY_SYSTEM_PROMPT = `You write a catch-up summary of a chat for
 
 ${preamble(false)}
 - Refer to the user as "You" and to the contact by contact_name (or "They" if null).
+
+${TIME_RULES}
+- Resolve relative days into real days in the summary (e.g. "Rahul promised the details for today (Tue)"), and mark items that are overdue as of "now".
 
 OUTPUT: only this JSON object, with no markdown and no extra text:
 {"brief": "<1-2 sentences>", "keyPoints": ["..."], "directAsks": ["questions or requests the CONTACT made to the user that are still open"], "actionItems": ["commitments pending from either side, saying who owes what"]}`;

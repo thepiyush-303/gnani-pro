@@ -85,7 +85,7 @@ class SessionBuffer {
 
             for (i in endIdx + 1 until visible.size) {
                 if (deque.size >= MAX_CAPACITY) deque.removeFirst()
-                deque.addLast(visible[i])
+                deque.addLast(withInheritedDate(visible[i], deque.lastOrNull()))
                 changes++
             }
             if (changes > 0) Log.d(TAG, "merge(append) changes=$changes size=${deque.size}")
@@ -141,19 +141,34 @@ class SessionBuffer {
         return best
     }
 
-    /** Re-attributes buffered bubbles whose sender was null when the screen now knows it. */
+    /**
+     * Fills in what a previous pass could not resolve (sender, day, time) when
+     * the screen now knows it. Known values are never overwritten.
+     */
     private fun upgradeSenders(visible: List<ChatBubble>, screenStart: Int, bufferStart: Int, len: Int): Int {
         var changes = 0
         for (k in 0 until len) {
             val old = deque[bufferStart + k]
             val fresh = visible[screenStart + k]
-            if (old.isSelf == null && fresh.isSelf != null) {
-                deque[bufferStart + k] = old.copy(isSelf = fresh.isSelf)
+            val merged = old.copy(
+                isSelf = old.isSelf ?: fresh.isSelf,
+                sentDate = old.sentDate ?: fresh.sentDate,
+                sentTime = old.sentTime ?: fresh.sentTime,
+            )
+            if (merged != old) {
+                deque[bufferStart + k] = merged
                 changes++
             }
         }
         return changes
     }
+
+    /**
+     * A message appended below a known message, with no date divider between
+     * them on screen, was sent on the same day — inherit it.
+     */
+    private fun withInheritedDate(bubble: ChatBubble, previous: ChatBubble?): ChatBubble =
+        if (bubble.sentDate == null && previous?.sentDate != null) bubble.copy(sentDate = previous.sentDate) else bubble
 
     // ───────────────────────────────────────────────────────────────
     // Session boundary

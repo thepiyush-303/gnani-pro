@@ -16,8 +16,23 @@ import { isLlmError } from '../src/services/llm/llmClient';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-const u = (text: string): ChatBubble => ({ text, isSelf: true, capturedAtMs: 0, appPackage: 'com.whatsapp' });
-const c = (text: string): ChatBubble => ({ text, isSelf: false, capturedAtMs: 0, appPackage: 'com.whatsapp' });
+const u = (text: string, sentDate?: string, sentTime?: string): ChatBubble =>
+  ({ text, isSelf: true, capturedAtMs: 0, appPackage: 'com.whatsapp', sentDate, sentTime });
+const c = (text: string, sentDate?: string, sentTime?: string): ChatBubble =>
+  ({ text, isSelf: false, capturedAtMs: 0, appPackage: 'com.whatsapp', sentDate, sentTime });
+
+// ─── Dated fixtures (now = Tue 3 Nov 2026) ───
+const at = (iso: string) => new Date(iso); // local time
+const PROMISE_YESTERDAY = [
+  u('bhai project ki details bhej de', '2026-11-02', '18:05'),
+  c('abhi bahar hu, kal subah tak bhej dunga pakka', '2026-11-02', '18:20'),
+  u('ok bhai', '2026-11-02', '18:21'),
+];
+const PROMISE_KEPT = [...PROMISE_YESTERDAY, c('ye le details, check kar le', '2026-11-03', '09:15')];
+const PAST_PLAN = [
+  c('kal 5 baje cafe pe milte hain', '2026-10-30', '14:00'),
+  u('done', '2026-10-30', '14:02'),
+];
 
 const BOSS_CHAT = [
   c('Good morning. Are you joining the offsite on Saturday?'),
@@ -91,7 +106,13 @@ function blindlyAppended(draft: string, out: string): boolean {
   return new RegExp(`^${esc}[\\s,!.]*(bhai|yaar|bro|ji)[\\s!.]*$`, 'i').test(out.trim());
 }
 
+/** Spacing between live calls so a full run stays under the Gemini free-tier rate limit. */
+const PACE_MS = Number(process.env.EVAL_PACE_MS ?? 4500);
+let firstCall = true;
+
 async function attempt<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+  if (!firstCall) await new Promise((r) => setTimeout(r, PACE_MS));
+  firstCall = false;
   const t0 = Date.now();
   try {
     const r = await fn();
@@ -171,7 +192,53 @@ async function main() {
     console.log('   (manual check: these should be follow-ups/nudges by the user, not answers to their own question)');
   }
 
-  // 5. Empty conversation short-circuits without a network call
+  // 5. Time awareness
+  const due = await attempt('Smart Replies · promise from yesterday, reopened next morning', () =>
+    generateSmartReplies(PROMISE_YESTERDAY, 'Rahul', { now: at('2026-11-03T11:00:00') }));
+  if (due) {
+    console.log(`   follow_up: "${due.followUp}"`);
+    due.replies.forEach((x, i) => console.log(`   ${i + 1}. ${x}`));
+    due.followUp ? pass('flags the pending promise') : fail('no follow_up for a promise due today');
+    due.replies.some((x) => /detail|bhej|bheji|kya hua|aaya|mila/i.test(x))
+      ? pass('replies follow up on the details')
+      : fail('replies ignore the pending details');
+  }
+  const notYet = await attempt('Smart Replies · same chat, same evening (not due yet)', () =>
+    generateSmartReplies(PROMISE_YESTERDAY, 'Rahul', { now: at('2026-11-02T18:30:00') }));
+  if (notYet) {
+    console.log(`   follow_up: "${notYet.followUp}"`);
+    notYet.replies.forEach((x, i) => console.log(`   ${i + 1}. ${x}`));
+    !notYet.followUp ? pass('nothing flagged before it is due') : fail('flagged a promise that is not due yet');
+  }
+  const kept = await attempt('Smart Replies · promise kept this morning', () =>
+    generateSmartReplies(PROMISE_KEPT, 'Rahul', { now: at('2026-11-03T11:00:00') }));
+  if (kept) {
+    console.log(`   follow_up: "${kept.followUp}"`);
+    kept.replies.forEach((x, i) => console.log(`   ${i + 1}. ${x}`));
+    !kept.followUp ? pass('nothing flagged once delivered') : fail('flagged a promise that was already kept');
+  }
+  const past = await attempt('Smart Replies · plan from 4 days ago', () =>
+    generateSmartReplies(PAST_PLAN, 'Neha', { now: at('2026-11-03T11:00:00') }));
+  if (past) {
+    console.log(`   follow_up: "${past.followUp}"`);
+    past.replies.forEach((x, i) => console.log(`   ${i + 1}. ${x}`));
+    const upcoming = past.replies.filter((x) => /\b(today|tonight|tomorrow|aaj|kal)\b/i.test(x));
+    upcoming.length
+      ? fail(`treats a 4-day-old plan as today/tomorrow: ${upcoming.join(' | ')}`)
+      : pass('does not treat the old plan as upcoming');
+  }
+  const stale = await attempt('Improve · "kal bhej dunga" when it was due today', () =>
+    improveText('kal bhej dunga', [
+      c('report kab tak aayegi?', '2026-11-02', '10:00'),
+      u('kal tak bhej dunga', '2026-11-02', '10:05'),
+      c('?', '2026-11-03', '10:30'),
+    ], 'Boss', { now: at('2026-11-03T11:00:00') }));
+  if (stale) {
+    console.log(`   ${stale.improved}  (note: ${stale.note})`);
+    /today|tomorrow|promised|pushes/i.test(stale.note) ? pass('note flags the timing conflict') : fail('no heads-up about timing');
+  }
+
+  // 6. Empty conversation short-circuits without a network call
   const empty = await generateSmartReplies([], 'Nobody');
   empty.replies.length === 0 ? pass('\nempty chat → no replies, no call') : fail('empty chat produced replies');
 

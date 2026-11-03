@@ -223,7 +223,8 @@ async function callGemini(messages: LlmMessage[], opts: CallOptions, deadline: n
       .map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
     generationConfig: {
       temperature: opts.temperature ?? 0.5,
-      maxOutputTokens: opts.maxTokens ?? 1024,
+      // Thinking tokens count against this cap — leave room so the JSON answer isn't truncated.
+      maxOutputTokens: (opts.maxTokens ?? 1024) + ((opts.thinking ?? 'minimal') === 'minimal' ? 256 : 2048),
       thinkingConfig: { thinkingLevel: opts.thinking ?? 'minimal' },
       ...(opts.json ? { responseMimeType: 'application/json' } : {}),
     },
@@ -249,6 +250,9 @@ async function callGemini(messages: LlmMessage[], opts: CallOptions, deadline: n
     throw new LlmError('blocked', `Prompt blocked: ${data.promptFeedback.blockReason}`, { endpoint: label });
   }
   const cand = data.candidates?.[0];
+  if (cand?.finishReason === 'MAX_TOKENS') {
+    console.warn(`${TAG} Gemini output truncated (MAX_TOKENS) — JSON will likely fail to parse`);
+  }
   const text = (cand?.content?.parts ?? [])
     .filter((p) => !p.thought && typeof p.text === 'string')
     .map((p) => p.text)

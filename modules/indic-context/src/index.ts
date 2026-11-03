@@ -20,6 +20,10 @@ export interface ChatBubble {
   nodeClassName: string | null;
   /** Package name of the host app, e.g. "com.whatsapp" */
   appPackage: string;
+  /** Day the message was sent (yyyy-MM-dd), resolved on-device from date dividers; null if unknown */
+  sentDate?: string | null;
+  /** Time the message was sent (HH:mm, 24h); null if unknown */
+  sentTime?: string | null;
 }
 
 export interface PermissionStatus {
