@@ -14,6 +14,10 @@
 
 const TAG = '[IndicLLM]';
 
+// Expo provides `process.env` at build time, but this client is also compiled
+// without Node's ambient type definitions.
+declare const process: { env: Record<string, string | undefined> };
+
 // NOTE: Expo only inlines EXPO_PUBLIC_* vars when read as literal `process.env.X` member accesses.
 function clean(v: string | undefined): string | undefined {
   return v && v.trim() ? v.trim() : undefined;
@@ -21,11 +25,15 @@ function clean(v: string | undefined): string | undefined {
 
 export type LlmProvider = 'gemini' | 'evon';
 
-const PROVIDER: LlmProvider = clean(process.env.EXPO_PUBLIC_LLM_PROVIDER)?.toLowerCase() === 'evon' ? 'evon' : 'gemini';
+const PROVIDER: LlmProvider =
+  clean(process.env.EXPO_PUBLIC_LLM_PROVIDER)?.toLowerCase() === 'evon'
+    ? 'evon'
+    : 'gemini';
 
 // ── Gemini ──
 const GEMINI_API_KEY = clean(process.env.EXPO_PUBLIC_GEMINI_API_KEY);
-const GEMINI_MODEL = clean(process.env.EXPO_PUBLIC_GEMINI_MODEL) ?? 'gemini-3.5-flash-lite';
+const GEMINI_MODEL =
+  clean(process.env.EXPO_PUBLIC_GEMINI_MODEL) ?? 'gemini-3.5-flash-lite';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 // ── Evon (OpenAI-compatible) ──
@@ -45,7 +53,9 @@ const EVON_ENDPOINT = clean(process.env.EXPO_PUBLIC_EVON_ENDPOINT);
 const EVON_ENDPOINTS = EVON_ENDPOINT ? [EVON_ENDPOINT] : EVON_LEGACY_ENDPOINTS;
 const EVON_MODEL = clean(process.env.EXPO_PUBLIC_EVON_MODEL) ?? 'evon-3.3';
 const EVON_API_KEY =
-  clean(process.env.EXPO_PUBLIC_EVON_API_KEY) ?? clean(process.env.EXPO_PUBLIC_GNANI_API_KEY) ?? GNANI_DEFAULT_KEY;
+  clean(process.env.EXPO_PUBLIC_EVON_API_KEY) ??
+  clean(process.env.EXPO_PUBLIC_GNANI_API_KEY) ??
+  GNANI_DEFAULT_KEY;
 
 /** Gnani speech (Prisma STT) key — kept separate so an LLM key never reaches STT. */
 export function getGnaniSttKey(): string {
@@ -61,14 +71,25 @@ export function getLlmInfo(): { provider: LlmProvider; model: string } {
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
-export type LlmErrorKind = 'config' | 'timeout' | 'http' | 'network' | 'empty' | 'blocked' | 'parse';
+export type LlmErrorKind =
+  | 'config'
+  | 'timeout'
+  | 'http'
+  | 'network'
+  | 'empty'
+  | 'blocked'
+  | 'parse';
 
 export class LlmError extends Error {
   readonly kind: LlmErrorKind;
   readonly status?: number;
   readonly endpoint?: string;
 
-  constructor(kind: LlmErrorKind, message: string, opts: { status?: number; endpoint?: string } = {}) {
+  constructor(
+    kind: LlmErrorKind,
+    message: string,
+    opts: { status?: number; endpoint?: string } = {},
+  ) {
     super(message);
     this.name = 'LlmError';
     this.kind = kind;
@@ -92,7 +113,8 @@ export function describeLlmError(e: unknown): string {
     case 'network':
       return "Couldn't reach the AI service. Check your connection and tap Retry.";
     case 'http':
-      if (e.status === 429) return 'Free-tier rate limit reached. Wait a few seconds and tap Retry.';
+      if (e.status === 429)
+        return 'Free-tier rate limit reached. Wait a few seconds and tap Retry.';
       return `AI service error${e.status ? ` (HTTP ${e.status})` : ''}. Tap Retry.`;
     case 'blocked':
       return 'The AI declined to answer for this chat. Try rephrasing.';
@@ -123,9 +145,14 @@ export interface CallOptions {
 const DEFAULT_BUDGET_MS = 15000;
 const MIN_ATTEMPT_MS = 1500;
 
-export async function callLlm(messages: LlmMessage[], opts: CallOptions = {}): Promise<string> {
+export async function callLlm(
+  messages: LlmMessage[],
+  opts: CallOptions = {},
+): Promise<string> {
   const deadline = Date.now() + (opts.budgetMs ?? DEFAULT_BUDGET_MS);
-  return PROVIDER === 'gemini' ? callGemini(messages, opts, deadline) : callEvon(messages, opts, deadline);
+  return PROVIDER === 'gemini'
+    ? callGemini(messages, opts, deadline)
+    : callEvon(messages, opts, deadline);
 }
 
 /**
@@ -140,7 +167,8 @@ export async function callLlmJson<T>(
   const raw = await callLlm(messages, { ...opts, json: true });
   try {
     const obj = extractJsonObject(raw);
-    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('Completion is not a JSON object');
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj))
+      throw new Error('Completion is not a JSON object');
     return validate(obj as Record<string, unknown>);
   } catch (e: unknown) {
     const msg = (e as { message?: string })?.message ?? String(e);
@@ -159,7 +187,10 @@ async function postJson(
   label: string,
 ): Promise<unknown> {
   const remaining = deadline - Date.now();
-  if (remaining < MIN_ATTEMPT_MS) throw new LlmError('timeout', 'LLM time budget exhausted', { endpoint: label });
+  if (remaining < MIN_ATTEMPT_MS)
+    throw new LlmError('timeout', 'LLM time budget exhausted', {
+      endpoint: label,
+    });
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), remaining);
@@ -173,8 +204,13 @@ async function postJson(
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      console.warn(`${TAG} HTTP ${res.status} from ${label}: ${text.slice(0, 200)}`);
-      throw new LlmError('http', `HTTP ${res.status}`, { status: res.status, endpoint: label });
+      console.warn(
+        `${TAG} HTTP ${res.status} from ${label}: ${text.slice(0, 200)}`,
+      );
+      throw new LlmError('http', `HTTP ${res.status}`, {
+        status: res.status,
+        endpoint: label,
+      });
     }
     const data = await res.json();
     console.log(`${TAG} ok ${label} in ${Date.now() - startedAt}ms`);
@@ -183,8 +219,12 @@ async function postJson(
     if (isLlmError(e)) throw e;
     const aborted = (e as { name?: string })?.name === 'AbortError';
     const msg = (e as { message?: string })?.message ?? String(e);
-    console.warn(`${TAG} ${aborted ? 'timeout' : 'network error'} at ${label} after ${Date.now() - startedAt}ms: ${msg}`);
-    throw new LlmError(aborted ? 'timeout' : 'network', msg, { endpoint: label });
+    console.warn(
+      `${TAG} ${aborted ? 'timeout' : 'network error'} at ${label} after ${Date.now() - startedAt}ms: ${msg}`,
+    );
+    throw new LlmError(aborted ? 'timeout' : 'network', msg, {
+      endpoint: label,
+    });
   } finally {
     clearTimeout(timer);
   }
@@ -210,21 +250,33 @@ interface GeminiResponse {
   promptFeedback?: { blockReason?: string };
 }
 
-async function callGemini(messages: LlmMessage[], opts: CallOptions, deadline: number): Promise<string> {
+async function callGemini(
+  messages: LlmMessage[],
+  opts: CallOptions,
+  deadline: number,
+): Promise<string> {
   if (!GEMINI_API_KEY) {
     throw new LlmError('config', 'EXPO_PUBLIC_GEMINI_API_KEY is not set');
   }
 
-  const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n');
+  const system = messages
+    .filter((m) => m.role === 'system')
+    .map((m) => m.content)
+    .join('\n\n');
   const body = {
     ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
     contents: messages
       .filter((m) => m.role !== 'system')
-      .map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+      .map((m) => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }],
+      })),
     generationConfig: {
       temperature: opts.temperature ?? 0.5,
       // Thinking tokens count against this cap — leave room so the JSON answer isn't truncated.
-      maxOutputTokens: (opts.maxTokens ?? 1024) + ((opts.thinking ?? 'minimal') === 'minimal' ? 256 : 2048),
+      maxOutputTokens:
+        (opts.maxTokens ?? 1024) +
+        ((opts.thinking ?? 'minimal') === 'minimal' ? 256 : 2048),
       thinkingConfig: { thinkingLevel: opts.thinking ?? 'minimal' },
       ...(opts.json ? { responseMimeType: 'application/json' } : {}),
     },
@@ -235,23 +287,46 @@ async function callGemini(messages: LlmMessage[], opts: CallOptions, deadline: n
 
   let data: GeminiResponse;
   try {
-    data = (await postJson(url, { 'x-goog-api-key': GEMINI_API_KEY }, body, deadline, label)) as GeminiResponse;
+    data = (await postJson(
+      url,
+      { 'x-goog-api-key': GEMINI_API_KEY },
+      body,
+      deadline,
+      label,
+    )) as GeminiResponse;
   } catch (e) {
     // One retry for transient free-tier throttling / overload, if budget allows.
-    if (isLlmError(e) && e.kind === 'http' && (e.status === 429 || e.status === 503) && deadline - Date.now() > 4000) {
+    if (
+      isLlmError(e) &&
+      e.kind === 'http' &&
+      (e.status === 429 || e.status === 503) &&
+      deadline - Date.now() > 4000
+    ) {
       await sleep(1500);
-      data = (await postJson(url, { 'x-goog-api-key': GEMINI_API_KEY }, body, deadline, label)) as GeminiResponse;
+      data = (await postJson(
+        url,
+        { 'x-goog-api-key': GEMINI_API_KEY },
+        body,
+        deadline,
+        label,
+      )) as GeminiResponse;
     } else {
       throw e;
     }
   }
 
   if (data.promptFeedback?.blockReason) {
-    throw new LlmError('blocked', `Prompt blocked: ${data.promptFeedback.blockReason}`, { endpoint: label });
+    throw new LlmError(
+      'blocked',
+      `Prompt blocked: ${data.promptFeedback.blockReason}`,
+      { endpoint: label },
+    );
   }
   const cand = data.candidates?.[0];
   if (cand?.finishReason === 'MAX_TOKENS') {
-    console.warn(`${TAG} Gemini output truncated (MAX_TOKENS) — JSON will likely fail to parse`);
+    console.warn(
+      `${TAG} Gemini output truncated (MAX_TOKENS) — JSON will likely fail to parse`,
+    );
   }
   const text = (cand?.content?.parts ?? [])
     .filter((p) => !p.thought && typeof p.text === 'string')
@@ -261,26 +336,51 @@ async function callGemini(messages: LlmMessage[], opts: CallOptions, deadline: n
   if (!text) {
     const reason = cand?.finishReason ?? 'unknown';
     console.warn(`${TAG} empty Gemini completion (finishReason=${reason})`);
-    throw new LlmError(reason === 'SAFETY' ? 'blocked' : 'empty', `No text (finishReason=${reason})`, { endpoint: label });
+    throw new LlmError(
+      reason === 'SAFETY' ? 'blocked' : 'empty',
+      `No text (finishReason=${reason})`,
+      { endpoint: label },
+    );
   }
   return text;
 }
 
 // ─── Evon / OpenAI-compatible provider ───────────────────────────────────────
 
-async function callEvon(messages: LlmMessage[], opts: CallOptions, deadline: number): Promise<string> {
+async function callEvon(
+  messages: LlmMessage[],
+  opts: CallOptions,
+  deadline: number,
+): Promise<string> {
   let lastError: LlmError | null = null;
 
   for (const endpoint of EVON_ENDPOINTS) {
     try {
       const data = (await postJson(
         endpoint,
-        { 'x-api-key': EVON_API_KEY, 'X-API-Key-ID': EVON_API_KEY, Authorization: `Bearer ${EVON_API_KEY}` },
-        { model: EVON_MODEL, messages, temperature: opts.temperature ?? 0.5, max_tokens: opts.maxTokens ?? 400 },
+        {
+          'x-api-key': EVON_API_KEY,
+          'X-API-Key-ID': EVON_API_KEY,
+          Authorization: `Bearer ${EVON_API_KEY}`,
+        },
+        {
+          model: EVON_MODEL,
+          messages,
+          temperature: opts.temperature ?? 0.5,
+          max_tokens: opts.maxTokens ?? 400,
+        },
         deadline,
         endpoint,
-      )) as { choices?: Array<{ message?: { content?: string } }>; result?: string; text?: string };
-      const content = data?.choices?.[0]?.message?.content ?? data?.result ?? data?.text ?? '';
+      )) as {
+        choices?: Array<{ message?: { content?: string } }>;
+        result?: string;
+        text?: string;
+      };
+      const content =
+        data?.choices?.[0]?.message?.content ??
+        data?.result ??
+        data?.text ??
+        '';
       if (typeof content === 'string' && content.trim()) return content.trim();
       lastError = new LlmError('empty', 'Empty completion', { endpoint });
     } catch (e) {
@@ -332,6 +432,8 @@ export function asString(v: unknown, fallback = ''): string {
 
 export function asStringArray(v: unknown): string[] {
   return Array.isArray(v)
-    ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim())
+    ? v
+        .filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+        .map((x) => x.trim())
     : [];
 }
