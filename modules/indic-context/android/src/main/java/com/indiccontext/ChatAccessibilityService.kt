@@ -46,6 +46,33 @@ class ChatAccessibilityService : AccessibilityService() {
 
     // State
     private var foregroundPkg: String? = null
+
+    /** The supported chat app currently in front (e.g. "com.whatsapp" / "com.whatsapp.w4b"), if any. */
+    val currentChatPackage: String?
+        get() = foregroundPkg?.takeIf { it in SUPPORTED_PACKAGES }
+
+    private val autoSender by lazy { WhatsAppAutoSender(this) }
+
+    /**
+     * Title of the WhatsApp conversation open RIGHT NOW (read fresh from the
+     * screen, not the cached [activeThreadTitle]) with its package, or null if
+     * the foreground screen isn't a conversation.
+     */
+    fun openConversation(): Pair<String, String>? {
+        val root = try { rootInActiveWindow } catch (e: Exception) { null } ?: return null
+        try {
+            val pkg = root.packageName?.toString() ?: return null
+            if (pkg !in SUPPORTED_PACKAGES) return null
+            val title = firstText(root, "$pkg:id/conversation_contact_name") ?: return null
+            return WhatsAppAutoSender.normalize(title).takeIf { it.isNotEmpty() }?.let { it to pkg }
+        } finally {
+            safeRecycle(root)
+        }
+    }
+
+    /** Selects [title] in WhatsApp's share picker and taps send (see [WhatsAppAutoSender]). */
+    fun startAutoSend(title: String, pkg: String, onDone: (Boolean, String) -> Unit) =
+        autoSender.start(title, pkg, onDone)
     private var inputFocused = false
     private var isKeyboardCurrentlyOpen = false
     private val inputBoundsRect = Rect()
@@ -107,6 +134,7 @@ class ChatAccessibilityService : AccessibilityService() {
         super.onDestroy()
         instance = null
         mainHandler.removeCallbacksAndMessages(null)
+        autoSender.cancel()
         buffer.clear()
         clearFocusedNode()
         OverlayService.instance?.hideOverlay(immediate = true)

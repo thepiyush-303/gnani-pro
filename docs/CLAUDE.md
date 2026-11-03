@@ -40,6 +40,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
      - Detect input field focus for positioning the overlay.
      - Inject AI-generated text back into the input field.
    - **GnaniSttClient.kt**: Handles communication with Gnani Prisma Speech-to-Text API.
+   - **GnaniTtsClient.kt**: Gnani Timbre v3.0 text-to-speech (`/api/v1/tts/inference`, Ogg/Opus output, same API key as STT).
+   - **VoiceChangerController.kt**: the 🗣️ Voice Changer flow (see `docs/VOICE_CHANGER.md`).
+   - **GlideMenu.kt**: hold-and-glide picker in its own overlay window (🎙️ languages, 🗣️ voices).
+   - **WhatsAppAutoSender.kt**: selects the open chat in WhatsApp's share picker and taps send (guarded; see `docs/VOICE_CHANGER.md`).
    - **VoiceRecorder.kt**: Manages audio recording using Android's MediaRecorder.
    - **IndicContextModule.kt**: Kotlin module bridging native functionality to JavaScript via Expo's native module system.
      - Exposes async functions for permissions, Gnani config, overlay control, voice recording, buffer access, and text injection.
@@ -78,7 +82,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. **Overlay Display**:
    - Dashboard controls overlay mode via `IndicContextModule.setOverlayMode()`.
    - `OverlayService` shows/hides toolbar or edge pill based on mode and input focus events from `ChatAccessibilityService`.
-   - Toolbar buttons: ✨ Improve Text, 🔍 Fact Check, 💬 Smart Replies, 🎙️ voice, and collapse. Each emits `onActionTriggered` with `improve` | `factcheck` | `smart_replies`.
+   - Toolbar buttons: ✨ Improve Text, 🗣️ Voice Changer, 💬 Smart Replies, 🎙️ dictation, and collapse. ✨ and 💬 emit `onActionTriggered` (`improve` | `smart_replies`) to JS. 🗣️ runs fully natively (`VoiceChangerController`): tap = record/stop, hold + glide = pick a voice. 🎙️: tap = dictation, hold + glide = language. Fact Check is no longer on the toolbar; its JS handler and service remain.
 
 3. **Voice-to-Text (Phase 3)**:
    - User taps microphone button in toolbar → `OverlayService.toggleVoiceRecording()`.

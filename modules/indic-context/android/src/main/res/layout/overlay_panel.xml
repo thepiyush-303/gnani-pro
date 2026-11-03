@@ -4,7 +4,7 @@
   Features:
     1. disk_container — 42x42dp Dark Glass circular ring (draggable + edge snapping)
     2. toolbar_container — Dark Glass compact toolbar with dynamic edge reversal (< on right, > on left)
-    3. language_popup_wrapper — Floating language list + Caret pointing to Mic icon (zIndex/elevation above toolbar)
+    3. Glide menus (language on 🎙️, voice on 🗣️) are separate overlay windows — see GlideMenu.kt
 -->
 <FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
@@ -58,7 +58,7 @@
         android:focusable="false"
         android:visibility="gone">
 
-        <!-- ── Action Buttons Container (✨, 🔍, 💬, 🎙️) ── -->
+        <!-- ── Action Buttons Container (✨, 🗣️, 💬, 🎙️) ── -->
         <LinearLayout
             android:id="@+id/action_buttons_container"
             android:layout_width="wrap_content"
@@ -88,22 +88,66 @@
                     android:textSize="17sp" />
             </FrameLayout>
 
-            <!-- 2. 🔍 Fact Check -->
+            <!-- 2. 🗣️ Voice Changer — tap: record/stop · hold + glide: pick voice -->
             <FrameLayout
-                android:id="@+id/btn_factcheck"
-                android:layout_width="38dp"
+                android:id="@+id/btn_voice_changer"
+                android:layout_width="42dp"
                 android:layout_height="38dp"
                 android:layout_marginEnd="6dp"
                 android:background="@drawable/btn_bg_glass"
                 android:clickable="true"
-                android:focusable="true">
+                android:focusable="true"
+                android:contentDescription="Voice changer">
                 <TextView
+                    android:id="@+id/voice_changer_icon"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_gravity="center"
-                    android:text="🔍"
+                    android:text="🗣️"
                     android:textColor="#FAFAFA"
                     android:textSize="16sp" />
+                <!-- Selected voice badge (e.g. LAK) -->
+                <TextView
+                    android:id="@+id/txt_voice_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="bottom|end"
+                    android:layout_marginBottom="1dp"
+                    android:layout_marginEnd="1dp"
+                    android:background="@drawable/badge_lang_bg"
+                    android:paddingStart="3dp"
+                    android:paddingEnd="3dp"
+                    android:paddingTop="1dp"
+                    android:paddingBottom="1dp"
+                    android:text="DEV"
+                    android:textColor="#F0ABFC"
+                    android:textSize="7sp"
+                    android:textStyle="bold" />
+                <!-- Recording state: pulsing dot + timer (button expands into a red pill) -->
+                <LinearLayout
+                    android:id="@+id/voice_rec_state"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
+                    <View
+                        android:id="@+id/voice_rec_dot"
+                        android:layout_width="8dp"
+                        android:layout_height="8dp"
+                        android:layout_marginEnd="6dp"
+                        android:background="@drawable/rec_dot" />
+                    <TextView
+                        android:id="@+id/voice_rec_timer"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0:00"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:fontFeatureSettings="tnum" />
+                </LinearLayout>
             </FrameLayout>
 
             <!-- 3. 💬 Smart Replies -->
@@ -193,161 +237,6 @@
                 android:textStyle="bold" />
 
         </FrameLayout>
-
-    </LinearLayout>
-
-    <!-- ── Component 3: Glide-Select Language Menu Popup with Caret ── -->
-    <!-- Declared AFTER toolbar in FrameLayout + elevation 32dp for strict top Z-Index -->
-    <LinearLayout
-        android:id="@+id/language_popup_wrapper"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|start"
-        android:layout_marginBottom="56dp"
-        android:orientation="vertical"
-        android:clipChildren="false"
-        android:clipToPadding="false"
-        android:elevation="32dp"
-        android:translationZ="10dp"
-        android:visibility="gone">
-
-        <!-- Main Language Card -->
-        <LinearLayout
-            android:id="@+id/language_menu_card"
-            android:layout_width="200dp"
-            android:layout_height="wrap_content"
-            android:background="@drawable/language_menu_bg"
-            android:orientation="vertical"
-            android:padding="8dp"
-            android:elevation="32dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Glide finger to select"
-                android:textColor="#00E5FF"
-                android:textSize="10sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.05"
-                android:paddingStart="6dp"
-                android:paddingEnd="6dp"
-                android:paddingBottom="6dp" />
-
-            <!-- 1. English -->
-            <TextView
-                android:id="@+id/lang_item_en"
-                android:layout_width="match_parent"
-                android:layout_height="32dp"
-                android:layout_marginBottom="4dp"
-                android:background="@drawable/language_pill_bg"
-                android:gravity="center_vertical"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:text="English (EN)"
-                android:textColor="#FAFAFA"
-                android:textSize="12sp"
-                android:tag="en-IN:EN" />
-
-            <!-- 2. Hindi -->
-            <TextView
-                android:id="@+id/lang_item_hi"
-                android:layout_width="match_parent"
-                android:layout_height="32dp"
-                android:layout_marginBottom="4dp"
-                android:background="@drawable/language_pill_bg"
-                android:gravity="center_vertical"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:text="Hindi (हिन्दी - HI)"
-                android:textColor="#FAFAFA"
-                android:textSize="12sp"
-                android:tag="hi-IN:HI" />
-
-            <!-- 3. Marathi -->
-            <TextView
-                android:id="@+id/lang_item_mr"
-                android:layout_width="match_parent"
-                android:layout_height="32dp"
-                android:layout_marginBottom="4dp"
-                android:background="@drawable/language_pill_bg"
-                android:gravity="center_vertical"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:text="Marathi (मराठी - MR)"
-                android:textColor="#FAFAFA"
-                android:textSize="12sp"
-                android:tag="mr-IN:MR" />
-
-            <!-- 4. Bangla -->
-            <TextView
-                android:id="@+id/lang_item_bn"
-                android:layout_width="match_parent"
-                android:layout_height="32dp"
-                android:layout_marginBottom="4dp"
-                android:background="@drawable/language_pill_bg"
-                android:gravity="center_vertical"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:text="Bangla (বাংলা - BN)"
-                android:textColor="#FAFAFA"
-                android:textSize="12sp"
-                android:tag="bn-IN:BN" />
-
-            <!-- 5. Telugu -->
-            <TextView
-                android:id="@+id/lang_item_te"
-                android:layout_width="match_parent"
-                android:layout_height="32dp"
-                android:layout_marginBottom="4dp"
-                android:background="@drawable/language_pill_bg"
-                android:gravity="center_vertical"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:text="Telugu (తెలుగు - TE)"
-                android:textColor="#FAFAFA"
-                android:textSize="12sp"
-                android:tag="te-IN:TE" />
-
-            <!-- 6. Tamil -->
-            <TextView
-                android:id="@+id/lang_item_ta"
-                android:layout_width="match_parent"
-                android:layout_height="32dp"
-                android:layout_marginBottom="4dp"
-                android:background="@drawable/language_pill_bg"
-                android:gravity="center_vertical"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:text="Tamil (தமிழ் - TA)"
-                android:textColor="#FAFAFA"
-                android:textSize="12sp"
-                android:tag="ta-IN:TA" />
-
-            <!-- 7. Malayalam -->
-            <TextView
-                android:id="@+id/lang_item_ml"
-                android:layout_width="match_parent"
-                android:layout_height="32dp"
-                android:background="@drawable/language_pill_bg"
-                android:gravity="center_vertical"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:text="Malayalam (മലയാളം - ML)"
-                android:textColor="#FAFAFA"
-                android:textSize="12sp"
-                android:tag="ml-IN:ML" />
-
-        </LinearLayout>
-
-        <!-- Downward Caret (Vector Triangle) pointing directly at Mic icon below -->
-        <ImageView
-            android:id="@+id/menu_caret"
-            android:layout_width="14dp"
-            android:layout_height="8dp"
-            android:layout_gravity="start"
-            android:src="@drawable/ic_caret_down"
-            android:elevation="33dp"
-            android:translationZ="12dp" />
 
     </LinearLayout>
 
