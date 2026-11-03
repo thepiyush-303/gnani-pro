@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,11 +10,60 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import IndicContext, { type OverlayMode, type IndicLanguageCode } from 'indic-context';
+import IndicContext, {
+  type OverlayMode,
+  type IndicLanguageCode,
+  type ActionTriggeredEvent,
+} from 'indic-context';
+
+import {
+  ChatBubble,
+  FactCheckResult,
+  GlobalUserPersona,
+  HinglishIntensity,
+  ImproveTextResult,
+  SmartRepliesResult,
+  ThreadSummaryResult,
+  ToneOption,
+  ToneSensitivityResult,
+} from '../src/types/context';
+import { getGlobalPersona, updateGlobalPersona } from '../src/services/globalPersonaStore';
+import {
+  checkFactsAndInconsistencies,
+  checkToneSensitivity,
+  summarizeThread,
+} from '../src/services/gnaniEvonLlm';
+import { generateSmartReplies, improveText } from '../src/services/aiFeatures';
+import { describeLlmError, getGnaniSttKey, getLlmInfo, isLlmError } from '../src/services/llm/llmClient';
+
+const LLM_LABEL = (() => {
+  const { provider, model } = getLlmInfo();
+  return `${provider === 'gemini' ? 'Gemini' : 'Evon'} · ${model}`;
+})();
+import { getCleanFirstName } from '../src/utils/contactName';
+
+/** Local calendar day as yyyy-MM-dd (matches ChatBubble.sentDate). */
+function localIsoDay(d: Date = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** Overlay card header: a pending follow-up (something due/overdue) takes priority over tone info. */
+function smartRepliesCard(res: SmartRepliesResult, firstName: string, defaultTitle: string) {
+  return res.followUp
+    ? { title: `⏰ Follow up with ${firstName}`, subtitle: res.followUp }
+    : { title: defaultTitle, subtitle: describeInsight(res) };
+}
+
+/** "casual banter · close friends · Hinglish" — what the LLM inferred about the chat. */
+function describeInsight(r: { tone: string; relationship: string; language?: string }): string {
+  return [r.tone, r.relationship, r.language].filter((x) => x && x !== 'unknown').join(' · ');
+}
 
 // ─────────────────────────────────────────────
 // Types
@@ -83,6 +132,13 @@ const INDIC_LANGUAGES: { code: string; label: string }[] = [
   { code: 'pa-IN', label: 'Punjabi (ਪੰਜਾਬੀ)' },
 ];
 
+const TONES: { id: ToneOption; label: string }[] = [
+  { id: 'polite', label: 'Polite' },
+  { id: 'casual', label: 'Casual' },
+  { id: 'respectful', label: 'Respectful' },
+  { id: 'informative', label: 'Informative' },
+];
+
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const [copilotEnabled, setCopilotEnabled] = useState(false);
@@ -93,9 +149,30 @@ export default function DashboardScreen() {
     microphone: 'unknown',
   });
 
-  // Phase 2: live context buffer state
+  // Live context buffer & thread state
   const [bufferCount, setBufferCount] = useState(0);
   const [activeApp, setActiveApp] = useState<string | null>(null);
+  const [activeThreadTitle, setActiveThreadTitle] = useState<string | null>(null);
+  const [currentBuffer, setCurrentBuffer] = useState<ChatBubble[]>([]);
+
+  // Live Smart Replies (mirrors what the overlay card shows)
+  const [liveSmartReplies, setLiveSmartReplies] = useState<string[]>([]);
+  /** LLM-inferred tone / relationship / language for the active chat. */
+  const [liveInsight, setLiveInsight] = useState<string>('');
+  /** LLM-detected pending item for the active chat (e.g. a promise due today). */
+  const [liveFollowUp, setLiveFollowUp] = useState<string>('');
+  const [isGeneratingReplies, setIsGeneratingReplies] = useState(false);
+
+  // Passive Smart Replies bookkeeping: run once per (chat, day, last message); drop stale results
+  const handledKeysRef = useRef<Set<string>>(new Set());
+  const latestKeyRef = useRef<string>('');
+
+  // User's own global preferences
+  const [globalPersona, setGlobalPersona] = useState<GlobalUserPersona | null>(null);
+
+  // Catch-Up Summary state
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  const [summaryResult, setSummaryResult] = useState<ThreadSummaryResult | null>(null);
 
   // Phase 3: Voice-to-Text state
   const [selectedLanguage, setSelectedLanguage] = useState<string>('en-IN');
@@ -104,26 +181,77 @@ export default function DashboardScreen() {
   const [transcript, setTranscript] = useState<string>('');
   const [sttStatus, setSttStatus] = useState<string>('');
 
-  // Initialize Gnani configuration
+  // Interactive Test Bench state
+  const [testDraft, setTestDraft] = useState<string>('tu jaldi bhej abhi');
+  const [testToneResult, setTestToneResult] = useState<ToneSensitivityResult | null>(null);
+  const [testFactResult, setTestFactResult] = useState<FactCheckResult | null>(null);
+  const [testRepliesResult, setTestRepliesResult] = useState<SmartRepliesResult | null>(null);
+  const [testImproveResult, setTestImproveResult] = useState<ImproveTextResult | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  // Load initial global persona
   useEffect(() => {
-    const key =
-      (globalThis as typeof globalThis & { process?: { env?: { EXPO_PUBLIC_GNANI_API_KEY?: string } } }).process?.env
-        ?.EXPO_PUBLIC_GNANI_API_KEY ||
-      'vach_1ytE2CY5X2DI7nYe19xQ41pIcF75XgUXXFdRLhu4vuhN2qVlIHYqHNjYbqSZW3pAeBxWsMlcCQBgNUyg9O3hxFQoYUUpobcD_3d238769888eacc65a24109ee5f6fe78';
-    IndicContext.setGnaniConfig(key, selectedLanguage).catch(() => {});
+    getGlobalPersona().then(setGlobalPersona).catch(() => {});
+  }, []);
+
+  // Initialize Gnani speech (STT) configuration
+  useEffect(() => {
+    IndicContext.setGnaniConfig(getGnaniSttKey(), selectedLanguage).catch(() => {});
   }, [selectedLanguage]);
 
-  // Subscribe to Phase 2 & Phase 3 native events
+  // Subscribe to Native Events
   useEffect(() => {
-    const bufferSub = IndicContext.addBufferListener(({ buffer }) => {
-      setBufferCount(buffer.length);
+    const bufferSub = IndicContext.addBufferListener(async ({ buffer, threadTitle, threadId }) => {
+      const bubbles = buffer as ChatBubble[];
+      setBufferCount(bubbles.length);
+      setCurrentBuffer(bubbles);
+      if (threadTitle) setActiveThreadTitle(threadTitle);
+
+      // ── Passive Smart Replies ──
+      // Fire when (a) the newest attributed message is from the contact, or
+      // (b) the chat is reopened on a later day than its last message — so a
+      //     promise like "kal details bhejta hu" gets followed up the next day.
+      const lastAttributed = [...bubbles].reverse().find((b) => b.isSelf === true || b.isSelf === false);
+      if (!lastAttributed) return;
+      const today = localIsoDay();
+      const isIncoming = lastAttributed.isSelf === false;
+      const isFromEarlierDay = !!lastAttributed.sentDate && lastAttributed.sentDate < today;
+      if (!isIncoming && !isFromEarlierDay) return;
+
+      const msgKey = `${threadId ?? ''}|${today}|${lastAttributed.text.trim()}`;
+      latestKeyRef.current = msgKey;
+      if (handledKeysRef.current.has(msgKey)) return;
+      handledKeysRef.current.add(msgKey);
+      if (handledKeysRef.current.size > 200) handledKeysRef.current.clear();
+
+      try {
+        const res = await generateSmartReplies(bubbles, threadTitle);
+        // A newer message / another chat may have come up while we were waiting — drop stale results
+        if (latestKeyRef.current !== msgKey || res.replies.length === 0) return;
+        setLiveSmartReplies(res.replies);
+        setLiveInsight(describeInsight(res));
+        setLiveFollowUp(res.followUp);
+        const card = smartRepliesCard(res, getCleanFirstName(threadTitle), `💬 Reply to ${getCleanFirstName(threadTitle)}`);
+        await IndicContext.showSmartReplies(card.title, card.subtitle, res.replies);
+      } catch (e) {
+        // Passive suggestions never show an error card — just log why.
+        console.warn('[SmartReplies] auto generation failed:', isLlmError(e) ? `${e.kind} ${e.message}` : e);
+      }
     });
+
     const focusSub = IndicContext.addInputFocusListener(({ appPackage }) => {
       setActiveApp(appPackage.split('.').pop() ?? appPackage);
+      IndicContext.getActiveThread()
+        .then((info) => {
+          if (info.threadTitle) setActiveThreadTitle(info.threadTitle);
+        })
+        .catch(() => {});
     });
+
     const blurSub = IndicContext.addInputBlurListener(() => {
       setActiveApp(null);
     });
+
     const transcriptSub = IndicContext.addVoiceTranscriptListener((event) => {
       setIsTranscribing(false);
       setIsRecording(false);
@@ -136,14 +264,95 @@ export default function DashboardScreen() {
         setSttStatus('Transcription failed');
       }
     });
+
     const recordingSub = IndicContext.addRecordingStateListener((event) => {
       setIsRecording(event.isRecording);
       if (event.isRecording) {
         setSttStatus('🎙️ Listening... Speak into microphone');
       }
     });
+
     const disabledSub = IndicContext.addCopilotDisabledListener(() => {
       setCopilotEnabled(false);
+    });
+
+    // ── Floating Toolbar Action Trigger Interceptor (also fired by the error card's Retry chip) ──
+    const actionSub = IndicContext.addActionTriggeredListener(async (event: ActionTriggeredEvent) => {
+      const { action } = event;
+      try {
+        const buffer = (await IndicContext.getSessionBuffer()) as ChatBubble[];
+        const threadInfo = await IndicContext.getActiveThread();
+        const threadTitle = threadInfo?.threadTitle ?? null;
+        const firstName = getCleanFirstName(threadTitle);
+
+        // event.draftText is read by OverlayService at tap time; fall back to polling the input field
+        const rawDraft = (event.draftText && event.draftText.trim())
+          ? event.draftText.trim()
+          : ((await IndicContext.readInputFieldText()) || '').trim();
+
+        if (action === 'improve') {
+          if (!rawDraft) {
+            await IndicContext.showAiError('✨ Improve Text', 'Type a message in the chat first, then tap ✨.', null);
+            return;
+          }
+          const res = await improveText(rawDraft, buffer, threadTitle);
+          const options = [res.improved, ...res.alternatives];
+          await IndicContext.showSmartReplies(
+            res.wasModified ? `✨ Improved for ${firstName}` : '✨ Already sounds natural',
+            res.note || describeInsight(res),
+            options,
+          );
+          setLiveSmartReplies(options);
+          setLiveInsight(describeInsight(res));
+        } else if (action === 'smart_replies') {
+          const res = await generateSmartReplies(buffer, threadTitle);
+          if (res.replies.length === 0) {
+            await IndicContext.showAiError(
+              '💬 Smart Replies',
+              'No messages captured from this chat yet. Scroll the chat slightly and try again.',
+              null,
+            );
+            return;
+          }
+          const card = smartRepliesCard(res, firstName, `💬 Smart Replies for ${firstName}`);
+          await IndicContext.showSmartReplies(card.title, card.subtitle, res.replies);
+          setLiveSmartReplies(res.replies);
+          setLiveInsight(describeInsight(res));
+          setLiveFollowUp(res.followUp);
+        } else if (action === 'factcheck') {
+          if (!rawDraft) {
+            await IndicContext.showAiError('🔍 Fact Check', 'Type a message in the chat first, then tap 🔍.', null);
+            return;
+          }
+          const factResult = await checkFactsAndInconsistencies(rawDraft, buffer, threadTitle);
+          if (factResult.hasConflict && factResult.inconsistencies.length > 0) {
+            const warningMsg = factResult.inconsistencies
+              .map((i) => `• ${i.explanation}\n  Earlier: "${i.earlierStatement}"`)
+              .join('\n\n');
+
+            Alert.alert(
+              '⚠️ Fact Check Conflict Detected',
+              `${warningMsg}\n\nSuggested correction: "${factResult.suggestedCorrection}"`,
+              [
+                { text: 'Keep Draft', style: 'cancel' },
+                {
+                  text: 'Apply Correction',
+                  onPress: () => {
+                    if (factResult.suggestedCorrection) {
+                      IndicContext.injectText(factResult.suggestedCorrection).catch(() => {});
+                    }
+                  },
+                },
+              ],
+            );
+          } else {
+            Alert.alert('✓ Fact Check Passed', 'No factual inconsistencies or contradictions found with earlier messages.');
+          }
+        }
+      } catch (err: unknown) {
+        console.warn(`[Dashboard] action "${action}" failed:`, isLlmError(err) ? `${err.kind} ${err.message}` : err);
+        await IndicContext.showAiError('⚠️ AI unavailable', describeLlmError(err), action).catch(() => {});
+      }
     });
 
     return () => {
@@ -153,6 +362,7 @@ export default function DashboardScreen() {
       transcriptSub.remove();
       recordingSub.remove();
       disabledSub.remove();
+      actionSub.remove();
     };
   }, []);
 
@@ -166,7 +376,7 @@ export default function DashboardScreen() {
     }
   }, []);
 
-  // Poll permissions when screen is active (handles return from settings)
+  // Poll permissions when screen is active
   useEffect(() => {
     checkPermissions();
     const interval = setInterval(checkPermissions, 2000);
@@ -218,6 +428,137 @@ export default function DashboardScreen() {
     },
     [permissions, overlayMode],
   );
+
+  // ── Catch-Up Summary Trigger ──
+  const handleCatchUpSummary = useCallback(async () => {
+    setIsSummarizing(true);
+    try {
+      const buffer = (await IndicContext.getSessionBuffer()) as ChatBubble[];
+      const res = await summarizeThread(buffer, activeThreadTitle);
+      setSummaryResult(res);
+    } catch (err: unknown) {
+      Alert.alert('Summary Error', describeLlmError(err));
+    } finally {
+      setIsSummarizing(false);
+    }
+  }, [activeThreadTitle]);
+
+  // ── Global Persona Updates ──
+  const handleToneChange = useCallback(async (tone: ToneOption) => {
+    try {
+      const updated = await updateGlobalPersona({ defaultTone: tone });
+      setGlobalPersona(updated);
+    } catch (e) {
+      console.warn('[Dashboard] updateGlobalPersona tone error:', e);
+    }
+  }, []);
+
+  const handleHinglishChange = useCallback(async (intensity: HinglishIntensity) => {
+    try {
+      const updated = await updateGlobalPersona({ hinglishIntensity: intensity });
+      setGlobalPersona(updated);
+    } catch (e) {
+      console.warn('[Dashboard] updateGlobalPersona hinglish error:', e);
+    }
+  }, []);
+
+  // ── Interactive Test Bench Execution ──
+  // All tests run against the live captured buffer of the active chat; the LLM infers the relationship.
+  const getLiveBuffer = useCallback(async (): Promise<ChatBubble[]> => {
+    if (currentBuffer.length > 0) return currentBuffer;
+    return (await IndicContext.getSessionBuffer()) as ChatBubble[];
+  }, [currentBuffer]);
+
+  const clearTestResults = useCallback(() => {
+    setTestToneResult(null);
+    setTestFactResult(null);
+    setTestRepliesResult(null);
+    setTestImproveResult(null);
+  }, []);
+
+  const runTest = useCallback(
+    async (label: string, run: () => Promise<void>) => {
+      setIsAnalyzing(true);
+      clearTestResults();
+      try {
+        await run();
+      } catch (e: unknown) {
+        Alert.alert(`${label} Error`, isLlmError(e) ? describeLlmError(e) : String((e as Error)?.message ?? e));
+      } finally {
+        setIsAnalyzing(false);
+      }
+    },
+    [clearTestResults],
+  );
+
+  const runTestToneCheck = useCallback(
+    () =>
+      runTest('Tone Guard', async () => {
+        setTestToneResult(await checkToneSensitivity(testDraft, await getLiveBuffer(), activeThreadTitle));
+      }),
+    [runTest, testDraft, getLiveBuffer, activeThreadTitle],
+  );
+
+  const runTestFactCheck = useCallback(
+    () =>
+      runTest('Fact Check', async () => {
+        setTestFactResult(await checkFactsAndInconsistencies(testDraft, await getLiveBuffer(), activeThreadTitle));
+      }),
+    [runTest, testDraft, getLiveBuffer, activeThreadTitle],
+  );
+
+  const runTestSmartReplies = useCallback(
+    () =>
+      runTest('Smart Replies', async () => {
+        const res = await generateSmartReplies(await getLiveBuffer(), activeThreadTitle);
+        if (res.replies.length === 0) {
+          Alert.alert('Smart Replies', 'No attributed messages captured yet. Open a WhatsApp chat first.');
+          return;
+        }
+        setTestRepliesResult(res);
+      }),
+    [runTest, getLiveBuffer, activeThreadTitle],
+  );
+
+  const runTestImprove = useCallback(() => {
+    if (!testDraft.trim()) {
+      Alert.alert('Empty Draft', 'Please enter a test draft message to improve.');
+      return;
+    }
+    return runTest('Improve', async () => {
+      setTestImproveResult(await improveText(testDraft, await getLiveBuffer(), activeThreadTitle));
+    });
+  }, [runTest, testDraft, getLiveBuffer, activeThreadTitle]);
+
+  // ── Live Smart Replies (manual refresh from dashboard) ──
+  const handleGenerateLiveReplies = useCallback(async () => {
+    setIsGeneratingReplies(true);
+    try {
+      const res = await generateSmartReplies(await getLiveBuffer(), activeThreadTitle);
+      setLiveSmartReplies(res.replies);
+      setLiveInsight(describeInsight(res));
+      setLiveFollowUp(res.followUp);
+      if (res.replies.length > 0) {
+        const name = getCleanFirstName(activeThreadTitle);
+        const card = smartRepliesCard(res, name, `💬 Smart Replies for ${name}`);
+        await IndicContext.showSmartReplies(card.title, card.subtitle, res.replies);
+      }
+    } catch (e: unknown) {
+      Alert.alert('Smart Replies Error', describeLlmError(e));
+    } finally {
+      setIsGeneratingReplies(false);
+    }
+  }, [getLiveBuffer, activeThreadTitle]);
+
+  const handleInjectReply = useCallback(async (text: string) => {
+    try {
+      await IndicContext.injectText(text);
+      Alert.alert('✓ Injected into Chat', `Pasted directly into WhatsApp message bar:\n"${text}"`);
+    } catch (e: any) {
+      Clipboard.setString(text);
+      Alert.alert('Copied to Clipboard', `Pasting requires WhatsApp to be open with input bar active.\n\nCopied to clipboard:\n"${text}"`);
+    }
+  }, []);
 
   // ── Grant handlers ──
   const openOverlaySettings = useCallback(() => {
@@ -314,7 +655,7 @@ export default function DashboardScreen() {
         <Text style={styles.heroEmoji}>🧠</Text>
         <Text style={styles.heroTitle}>IndicContext Copilot</Text>
         <Text style={styles.heroSubtitle}>
-          A floating AI assistant that sits above your keyboard in any chat app.
+          Context-Aware Messaging Assistant · Gnani STT · {LLM_LABEL}
         </Text>
       </View>
 
@@ -328,9 +669,9 @@ export default function DashboardScreen() {
             <Text style={styles.toggleDesc}>
               {copilotEnabled
                 ? activeApp
-                  ? `Typing in ${activeApp} — toolbar ready above keyboard.`
-                  : 'Tap any chat input in WhatsApp or Telegram.'
-                : 'Enable to launch the floating overlay over your keyboard.'}
+                  ? `Active in ${activeApp} — floating toolbar ready above keyboard.`
+                  : 'Floating overlay enabled. Open WhatsApp to use.'
+                : 'Enable to launch the floating copilot overlay over your keyboard.'}
             </Text>
           </View>
           <Switch
@@ -343,10 +684,310 @@ export default function DashboardScreen() {
         </View>
       </View>
 
+      {/* ── Active Chat ── */}
+      <Text style={styles.sectionHeader}>Active Chat</Text>
+      <View style={styles.card}>
+        <View style={styles.threadHeaderRow}>
+          <View style={styles.threadTitleCol}>
+            <Text style={styles.threadLabel}>Active Conversation</Text>
+            <Text style={styles.threadContactName}>
+              {activeThreadTitle ? `💬 ${activeThreadTitle}` : 'Waiting for chat input in WhatsApp...'}
+            </Text>
+          </View>
+        </View>
+
+        {liveInsight ? (
+          <View style={styles.insightContainer}>
+            <Text style={styles.subLabel}>AI-inferred from the conversation:</Text>
+            <View style={styles.insightBadge}>
+              <Text style={styles.insightBadgeText}>{liveInsight}</Text>
+            </View>
+          </View>
+        ) : null}
+
+        <View style={styles.divider} />
+
+        {/* Catch-Up Summarizer Row */}
+        <View style={styles.summaryActionRow}>
+          <View style={styles.summaryMeta}>
+            <Text style={styles.summaryMetaTitle}>Buffer Context: {bufferCount} messages</Text>
+            <Text style={styles.summaryMetaSub}>RAM-only session storage</Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.catchUpBtn, bufferCount === 0 && styles.btnDisabled]}
+            disabled={bufferCount === 0 || isSummarizing}
+            onPress={handleCatchUpSummary}
+          >
+            {isSummarizing ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <Text style={styles.catchUpBtnText}>📑 Catch-Up Summary</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {summaryResult && (
+          <View style={styles.summaryResultBox}>
+            <Text style={styles.summaryResultBrief}>{summaryResult.brief}</Text>
+            {summaryResult.directAsks.length > 0 && (
+              <View style={styles.summarySubSection}>
+                <Text style={styles.summarySubHeading}>Direct Asks from Contact:</Text>
+                {summaryResult.directAsks.map((ask, i) => (
+                  <Text key={i} style={styles.summaryBullet}>• {ask}</Text>
+                ))}
+              </View>
+            )}
+            {summaryResult.actionItems.length > 0 && (
+              <View style={styles.summarySubSection}>
+                <Text style={styles.summarySubHeading}>Action Items & Deadlines:</Text>
+                {summaryResult.actionItems.map((act, i) => (
+                  <Text key={i} style={styles.summaryBullet}>• {act}</Text>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+
+      {/* ── Live Smart Replies Card ── */}
+      <Text style={styles.sectionHeader}>💬 Smart Replies</Text>
+      <View style={styles.card}>
+        <View style={styles.cardHeaderRow}>
+          <Text style={styles.subLabel}>
+            {activeThreadTitle
+              ? `Next-message suggestions for ${activeThreadTitle}`
+              : 'Waiting for a WhatsApp chat...'}
+          </Text>
+          <TouchableOpacity
+            style={styles.refreshBtn}
+            onPress={handleGenerateLiveReplies}
+            disabled={isGeneratingReplies}
+          >
+            {isGeneratingReplies ? (
+              <ActivityIndicator color="#00E5FF" size="small" />
+            ) : (
+              <Text style={styles.refreshBtnText}>🔄 Generate</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {liveFollowUp ? (
+          <View style={styles.suggestedBox}>
+            <Text style={styles.suggestedLabel}>⏰ Pending follow-up</Text>
+            <Text style={styles.suggestedText}>{liveFollowUp}</Text>
+          </View>
+        ) : null}
+
+        {liveSmartReplies.length > 0 ? (
+          <View style={styles.recommendationsList}>
+            {liveSmartReplies.map((reply, idx) => (
+              <View key={idx} style={styles.recommendationItem}>
+                <Text style={styles.recommendationText}>"{reply}"</Text>
+                <TouchableOpacity
+                  style={styles.injectSmallBtn}
+                  onPress={() => handleInjectReply(reply)}
+                >
+                  <Text style={styles.injectSmallBtnText}>Inject ↵</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.emptyStateText}>
+            When the contact sends a message, or you tap 💬 on the floating toolbar, 3 replies written in the chat's own tone and language appear here and on the overlay.
+          </Text>
+        )}
+      </View>
+
+      {/* ── User's own global preferences ── */}
+      <Text style={styles.sectionHeader}>Your Preferences</Text>
+      <View style={styles.card}>
+        <Text style={styles.subLabel}>Default Rewriting Tone:</Text>
+        <View style={styles.prefPillsRow}>
+          {TONES.map((t) => {
+            const isSelected = globalPersona?.defaultTone === t.id;
+            return (
+              <TouchableOpacity
+                key={t.id}
+                style={[styles.prefChip, isSelected && styles.prefChipActive]}
+                onPress={() => handleToneChange(t.id)}
+              >
+                <Text style={[styles.prefChipText, isSelected && styles.prefChipTextActive]}>
+                  {t.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <View style={styles.divider} />
+
+        <Text style={styles.subLabel}>Hinglish Intensity:</Text>
+        <View style={styles.prefPillsRow}>
+          {[
+            { id: 'pure_english' as HinglishIntensity, label: 'Pure English' },
+            { id: 'light_hinglish' as HinglishIntensity, label: 'Light Hinglish' },
+            { id: 'deep_indic' as HinglishIntensity, label: 'Deep Indic' },
+          ].map((item) => {
+            const isSelected = globalPersona?.hinglishIntensity === item.id;
+            return (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.prefChip, isSelected && styles.prefChipActive]}
+                onPress={() => handleHinglishChange(item.id)}
+              >
+                <Text style={[styles.prefChipText, isSelected && styles.prefChipTextActive]}>
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
+      {/* ── Context AI Feature Test Bench ── */}
+      <Text style={styles.sectionHeader}>Context AI Test Bench ({LLM_LABEL})</Text>
+      <View style={styles.card}>
+        <Text style={styles.subLabel}>Test Draft Message:</Text>
+        <TextInput
+          style={styles.testInput}
+          value={testDraft}
+          onChangeText={setTestDraft}
+          placeholder="Type draft (e.g. tu jaldi bhej, see you at 2pm, done)..."
+          placeholderTextColor="#64748B"
+        />
+
+        <View style={styles.testActionRow}>
+          <TouchableOpacity
+            style={styles.testActionBtn}
+            onPress={runTestToneCheck}
+            disabled={isAnalyzing}
+          >
+            <Text style={styles.testActionText}>🛡️ Tone Guard</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.testActionBtn}
+            onPress={runTestImprove}
+            disabled={isAnalyzing}
+          >
+            <Text style={styles.testActionText}>✨ Improve</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.testActionBtn}
+            onPress={runTestFactCheck}
+            disabled={isAnalyzing}
+          >
+            <Text style={styles.testActionText}>🔍 Fact Check</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.testActionBtn}
+            onPress={runTestSmartReplies}
+            disabled={isAnalyzing}
+          >
+            <Text style={styles.testActionText}>💬 Smart Replies</Text>
+          </TouchableOpacity>
+        </View>
+
+        {isAnalyzing && (
+          <View style={styles.analyzingRow}>
+            <ActivityIndicator color="#6366F1" size="small" />
+            <Text style={styles.analyzingText}>Analyzing with {LLM_LABEL}...</Text>
+          </View>
+        )}
+
+        {/* Tone Result Box */}
+        {testToneResult && (
+          <View style={[
+            styles.testResultCard,
+            testToneResult.isDisrespectful ? styles.testResultCardDanger : styles.testResultCardSuccess,
+          ]}>
+            <Text style={styles.resultTitle}>
+              {testToneResult.isDisrespectful ? '⚠️ Disrespect Flagged' : '✓ Respectful & Appropriate'}
+            </Text>
+            <Text style={styles.resultSub}>Detected Tone: {testToneResult.toneDetected}</Text>
+            {testToneResult.reasons.map((r, i) => (
+              <Text key={i} style={styles.resultDetail}>• {r}</Text>
+            ))}
+            {testToneResult.isDisrespectful && (
+              <View style={styles.suggestedBox}>
+                <Text style={styles.suggestedLabel}>Suggested Alternative:</Text>
+                <Text style={styles.suggestedText}>{testToneResult.suggestedDraft}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Fact Check Result Box */}
+        {testFactResult && (
+          <View style={[
+            styles.testResultCard,
+            testFactResult.hasConflict ? styles.testResultCardDanger : styles.testResultCardSuccess,
+          ]}>
+            <Text style={styles.resultTitle}>
+              {testFactResult.hasConflict ? '⚠️ Inconsistency Flagged' : '✓ Factual Consistency Verified'}
+            </Text>
+            {testFactResult.inconsistencies.map((inc, i) => (
+              <Text key={i} style={styles.resultDetail}>• {inc.explanation} ({inc.earlierStatement})</Text>
+            ))}
+            {testFactResult.suggestedCorrection && testFactResult.hasConflict && (
+              <View style={styles.suggestedBox}>
+                <Text style={styles.suggestedLabel}>Correction:</Text>
+                <Text style={styles.suggestedText}>{testFactResult.suggestedCorrection}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Smart Replies Result Box */}
+        {testRepliesResult && (
+          <View style={[styles.testResultCard, styles.testResultCardSuccess]}>
+            <Text style={styles.resultTitle}>💬 Smart Replies</Text>
+            <Text style={styles.resultSub}>{describeInsight(testRepliesResult)}</Text>
+            {testRepliesResult.followUp ? (
+              <Text style={styles.resultDetail}>⏰ {testRepliesResult.followUp}</Text>
+            ) : null}
+            {testRepliesResult.replies.map((s, i) => (
+              <TouchableOpacity
+                key={i}
+                style={styles.suggestionPill}
+                onPress={() => {
+                  Clipboard.setString(s);
+                  Alert.alert('Copied', `"${s}" copied to clipboard!`);
+                }}
+              >
+                <Text style={styles.suggestionPillText}>{i + 1}. {s}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* Improve Result Box */}
+        {testImproveResult && (
+          <View style={[styles.testResultCard, styles.testResultCardSuccess]}>
+            <Text style={styles.resultTitle}>
+              {testImproveResult.wasModified ? '✨ Contextual Rewrite' : '✨ Already sounds natural'}
+            </Text>
+            <Text style={styles.resultSub}>{describeInsight(testImproveResult)}</Text>
+            {testImproveResult.note ? <Text style={styles.resultDetail}>{testImproveResult.note}</Text> : null}
+            {[testImproveResult.improved, ...testImproveResult.alternatives].map((s, i) => (
+              <TouchableOpacity
+                key={i}
+                style={styles.suggestionPill}
+                onPress={() => {
+                  Clipboard.setString(s);
+                  Alert.alert('Copied', `"${s}" copied to clipboard!`);
+                }}
+              >
+                <Text style={styles.suggestionPillText}>{i === 0 ? '★ Best: ' : '• Option: '}{s}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </View>
+
       {/* ── Overlay Behaviour Mode ── */}
       <Text style={styles.sectionHeader}>Overlay Mode</Text>
       <View style={styles.modeContainer}>
-        {/* Mode A: Input Bar */}
         <TouchableOpacity
           style={[
             styles.modeCard,
@@ -375,7 +1016,6 @@ export default function DashboardScreen() {
           </Text>
         </TouchableOpacity>
 
-        {/* Mode B: Edge Slider */}
         <TouchableOpacity
           style={[
             styles.modeCard,
@@ -400,14 +1040,13 @@ export default function DashboardScreen() {
             </View>
           </View>
           <Text style={styles.modeDescription}>
-            Stays faded on the screen edge in WhatsApp, Telegram &amp; Instagram. Tap the pill to expand the AI assistant anytime; tap ✕ to collapse.
+            Stays docked on the screen edge in WhatsApp. Tap the pill to expand the AI assistant anytime; drag to edge to snap, or drop on bottom (X) to disable.
           </Text>
         </TouchableOpacity>
       </View>
 
       {/* ── Permissions Section ── */}
       <Text style={styles.sectionHeader}>Required Permissions</Text>
-
       <View style={styles.card}>
         <PermissionRow
           title="Draw Over Other Apps"
@@ -472,7 +1111,6 @@ export default function DashboardScreen() {
 
         <View style={styles.divider} />
 
-        {/* Live Mic Test Button */}
         <View style={styles.voiceTestContainer}>
           <TouchableOpacity
             style={[
@@ -500,7 +1138,6 @@ export default function DashboardScreen() {
 
           {sttStatus ? <Text style={styles.sttStatusText}>{sttStatus}</Text> : null}
 
-          {/* Transcript Display Box */}
           {transcript ? (
             <View style={styles.transcriptBox}>
               <View style={styles.transcriptHeader}>
@@ -519,37 +1156,6 @@ export default function DashboardScreen() {
           ) : null}
         </View>
       </View>
-
-      {/* ── Feature Overview ── */}
-      <Text style={styles.sectionHeader}>Features</Text>
-      <View style={styles.card}>
-        {[
-          { icon: '🎤', label: 'Voice-to-Text', note: 'Gnani Prisma V2.5 STT' },
-          { icon: '🎨', label: 'Tone & Temperature Rewrite', note: 'Gnani Evon LLM' },
-          { icon: '✅', label: 'Pre-Send Fact Check', note: 'Parallel interceptor' },
-          { icon: '🤝', label: 'Cultural Sensitivity', note: 'Persona-aware' },
-          { icon: '❄️', label: 'Icebreaker Suggestions', note: 'Context-driven' },
-        ].map((f, i, arr) => (
-          <React.Fragment key={f.label}>
-            <View style={styles.featureRow}>
-              <Text style={styles.featureIcon}>{f.icon}</Text>
-              <View>
-                <Text style={styles.featureLabel}>{f.label}</Text>
-                <Text style={styles.featureNote}>{f.note}</Text>
-              </View>
-            </View>
-            {i < arr.length - 1 && <View style={styles.divider} />}
-          </React.Fragment>
-        ))}
-      </View>
-
-      {/* ── Debug Info ── */}
-      {__DEV__ && (
-        <View style={[styles.card, styles.debugCard]}>
-          <Text style={styles.debugTitle}>DEV — Permission State</Text>
-          <Text style={styles.debugText}>{JSON.stringify(permissions, null, 2)}</Text>
-        </View>
-      )}
     </ScrollView>
   );
 }
@@ -563,16 +1169,16 @@ const styles = StyleSheet.create({
   content: { padding: 20 },
 
   // Hero
-  hero: { alignItems: 'center', marginBottom: 28, marginTop: 8 },
-  heroEmoji: { fontSize: 48, marginBottom: 12 },
+  hero: { alignItems: 'center', marginBottom: 24, marginTop: 8 },
+  heroEmoji: { fontSize: 44, marginBottom: 10 },
   heroTitle: { fontSize: 24, fontWeight: '800', color: '#F8FAFC', textAlign: 'center' },
   heroSubtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#94A3B8',
     textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 20,
-    maxWidth: 280,
+    marginTop: 6,
+    lineHeight: 18,
+    maxWidth: 300,
   },
 
   // Cards
@@ -600,8 +1206,215 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: 10,
+    marginTop: 6,
+  },
+
+  subLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#94A3B8',
+    marginBottom: 8,
+  },
+
+  // Tier 2 Active Thread
+  threadHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  threadTitleCol: { flex: 1, marginRight: 10 },
+  threadLabel: { fontSize: 11, fontWeight: '600', color: '#64748B', textTransform: 'uppercase' },
+  threadContactName: { fontSize: 16, fontWeight: '700', color: '#F8FAFC', marginTop: 2 },
+  insightBadge: {
+    backgroundColor: '#312E81',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#6366F1',
+  },
+  insightBadgeText: { fontSize: 11, fontWeight: '700', color: '#C7D2FE' },
+  insightContainer: { marginTop: 6 },
+  prefPillsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  prefChip: {
+    backgroundColor: '#0F172A',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  prefChipActive: { backgroundColor: '#4F46E5', borderColor: '#818CF8' },
+  prefChipText: { fontSize: 12, color: '#94A3B8', fontWeight: '500' },
+  prefChipTextActive: { color: '#FFFFFF', fontWeight: '700' },
+
+  // Summary Row
+  summaryActionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  summaryMeta: { flex: 1 },
+  summaryMetaTitle: { fontSize: 13, fontWeight: '600', color: '#CBD5E1' },
+  summaryMetaSub: { fontSize: 11, color: '#64748B', marginTop: 1 },
+  catchUpBtn: {
+    backgroundColor: '#0284C7',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  catchUpBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  btnDisabled: { opacity: 0.5 },
+  summaryResultBox: {
+    marginTop: 12,
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#0284C7',
+  },
+  summaryResultBrief: { fontSize: 13, color: '#F0F9FF', lineHeight: 18, fontWeight: '500' },
+  summarySubSection: { marginTop: 8 },
+  summarySubHeading: { fontSize: 11, color: '#38BDF8', fontWeight: '700', marginBottom: 2 },
+  summaryBullet: { fontSize: 12, color: '#CBD5E1', lineHeight: 16, marginLeft: 4 },
+
+  // Live Smart Replies
+  cardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  recommendationsList: {
+    gap: 8,
     marginTop: 4,
   },
+  recommendationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    gap: 8,
+  },
+  recommendationText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#F8FAFC',
+    lineHeight: 18,
+  },
+  injectSmallBtn: {
+    backgroundColor: '#0284C7',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  injectSmallBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  emptyStateText: {
+    fontSize: 12,
+    color: '#64748B',
+    lineHeight: 18,
+    fontStyle: 'italic',
+    paddingVertical: 4,
+  },
+  refreshBtn: {
+    backgroundColor: '#334155',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  refreshBtnText: {
+    color: '#00E5FF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
+  // Test Bench
+  testInput: {
+    backgroundColor: '#0F172A',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#F8FAFC',
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#334155',
+    marginBottom: 10,
+  },
+  testActionRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  testActionBtn: {
+    flex: 1,
+    backgroundColor: '#334155',
+    borderRadius: 8,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  testActionText: { color: '#F8FAFC', fontSize: 12, fontWeight: '600' },
+  analyzingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
+  analyzingText: { fontSize: 12, color: '#818CF8' },
+  testResultCard: {
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 6,
+    borderWidth: 1,
+  },
+  testResultCardDanger: { backgroundColor: '#450A0A', borderColor: '#EF4444' },
+  testResultCardSuccess: { backgroundColor: '#064E3B', borderColor: '#10B981' },
+  resultTitle: { fontSize: 14, fontWeight: '700', color: '#FFFFFF', marginBottom: 4 },
+  resultSub: { fontSize: 12, color: '#E2E8F0', marginBottom: 6 },
+  resultDetail: { fontSize: 12, color: '#CBD5E1', marginLeft: 4, lineHeight: 16 },
+  suggestedBox: {
+    marginTop: 8,
+    padding: 8,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 6,
+  },
+  suggestedLabel: { fontSize: 11, color: '#FDE047', fontWeight: '700' },
+  suggestedText: { fontSize: 13, color: '#FFFFFF', marginTop: 2, fontStyle: 'italic' },
+  suggestionPill: {
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    padding: 8,
+    borderRadius: 6,
+    marginTop: 6,
+  },
+  suggestionPillText: { fontSize: 12, color: '#FFFFFF' },
+
+  // Mode Selection
+  modeContainer: { gap: 12, marginBottom: 16 },
+  modeCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1.5,
+    borderColor: '#334155',
+  },
+  modeCardActive: { borderColor: '#6366F1', backgroundColor: '#182038' },
+  modeCardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  modeIcon: { fontSize: 22, marginRight: 10 },
+  modeCardTitleCol: { flex: 1 },
+  modeTitle: { fontSize: 15, fontWeight: '700', color: '#F8FAFC' },
+  modeSub: { fontSize: 11, color: '#94A3B8', marginTop: 1 },
+  radioCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#64748B',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioCircleActive: { borderColor: '#6366F1' },
+  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#6366F1' },
+  modeDescription: { fontSize: 12, color: '#94A3B8', lineHeight: 18 },
 
   // Permission rows
   permRow: {
@@ -623,93 +1436,8 @@ const styles = StyleSheet.create({
   },
   grantBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
 
-  // Divider
-  divider: { height: 1, backgroundColor: '#334155', marginVertical: 8 },
-
-  // Perm note
+  divider: { height: 1, backgroundColor: '#334155', marginVertical: 10 },
   permNote: { fontSize: 12, color: '#F59E0B', marginTop: -8, marginBottom: 16, lineHeight: 18 },
-
-  // Features
-  featureRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
-  featureIcon: { fontSize: 24, marginRight: 14, width: 32, textAlign: 'center' },
-  featureLabel: { fontSize: 14, fontWeight: '600', color: '#F8FAFC' },
-  featureNote: { fontSize: 12, color: '#64748B', marginTop: 2 },
-
-  // Debug
-  debugCard: { borderColor: '#854D0E', borderWidth: 1 },
-  debugTitle: { fontSize: 11, color: '#F59E0B', fontWeight: '700', marginBottom: 8 },
-  debugText: { fontSize: 10, color: '#94A3B8', fontFamily: 'monospace' },
-
-  // Phase 2 buffer badge
-  bufferBadgeRow: { marginTop: 10, alignItems: 'flex-start' },
-  bufferBadge: {
-    backgroundColor: '#1E3A5F',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: '#3B82F6',
-  },
-  bufferBadgeText: { fontSize: 11, color: '#93C5FD', fontWeight: '500' },
-
-  // Mode Selection
-  modeContainer: { gap: 12, marginBottom: 16 },
-  modeCard: {
-    backgroundColor: '#1E293B',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1.5,
-    borderColor: '#334155',
-  },
-  modeCardActive: {
-    borderColor: '#6366F1',
-    backgroundColor: '#182038',
-  },
-  modeCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  modeIcon: {
-    fontSize: 22,
-    marginRight: 10,
-  },
-  modeCardTitleCol: {
-    flex: 1,
-  },
-  modeTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#F8FAFC',
-  },
-  modeSub: {
-    fontSize: 11,
-    color: '#94A3B8',
-    marginTop: 1,
-  },
-  radioCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#64748B',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  radioCircleActive: {
-    borderColor: '#6366F1',
-  },
-  radioDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#6366F1',
-  },
-  modeDescription: {
-    fontSize: 12,
-    color: '#94A3B8',
-    lineHeight: 18,
-  },
 
   // Voice Section (Phase 3)
   voiceHeaderRow: {
@@ -718,11 +1446,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 8,
   },
-  voiceSectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#CBD5E1',
-  },
+  voiceSectionTitle: { fontSize: 13, fontWeight: '700', color: '#CBD5E1' },
   voiceModelBadge: {
     fontSize: 10,
     fontWeight: '700',
@@ -734,13 +1458,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#4338CA',
   },
-  langScroll: {
-    marginBottom: 6,
-  },
-  langScrollContent: {
-    gap: 8,
-    paddingVertical: 4,
-  },
+  langScroll: { marginBottom: 6 },
+  langScrollContent: { gap: 8, paddingVertical: 4 },
   langChip: {
     backgroundColor: '#1E293B',
     borderRadius: 20,
@@ -749,23 +1468,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#334155',
   },
-  langChipActive: {
-    backgroundColor: '#312E81',
-    borderColor: '#6366F1',
-  },
-  langChipText: {
-    fontSize: 12,
-    color: '#94A3B8',
-    fontWeight: '500',
-  },
-  langChipTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  voiceTestContainer: {
-    alignItems: 'center',
-    paddingVertical: 6,
-  },
+  langChipActive: { backgroundColor: '#312E81', borderColor: '#6366F1' },
+  langChipText: { fontSize: 12, color: '#94A3B8', fontWeight: '500' },
+  langChipTextActive: { color: '#FFFFFF', fontWeight: '700' },
+  voiceTestContainer: { alignItems: 'center', paddingVertical: 6 },
   voiceTestBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -776,26 +1482,11 @@ const styles = StyleSheet.create({
     gap: 10,
     elevation: 3,
   },
-  voiceTestBtnRecording: {
-    backgroundColor: '#DC2626',
-  },
-  voiceTestBtnTranscribing: {
-    backgroundColor: '#475569',
-  },
-  voiceTestIcon: {
-    fontSize: 18,
-  },
-  voiceTestBtnText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  sttStatusText: {
-    fontSize: 12,
-    color: '#94A3B8',
-    marginTop: 8,
-    textAlign: 'center',
-  },
+  voiceTestBtnRecording: { backgroundColor: '#DC2626' },
+  voiceTestBtnTranscribing: { backgroundColor: '#475569' },
+  voiceTestIcon: { fontSize: 18 },
+  voiceTestBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  sttStatusText: { fontSize: 12, color: '#94A3B8', marginTop: 8, textAlign: 'center' },
   transcriptBox: {
     marginTop: 14,
     width: '100%',
@@ -817,14 +1508,6 @@ const styles = StyleSheet.create({
     color: '#818CF8',
     textTransform: 'uppercase',
   },
-  copyBtnText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#38BDF8',
-  },
-  transcriptContent: {
-    fontSize: 14,
-    color: '#F8FAFC',
-    lineHeight: 20,
-  },
+  copyBtnText: { fontSize: 11, fontWeight: '700', color: '#38BDF8' },
+  transcriptContent: { fontSize: 14, color: '#F8FAFC', lineHeight: 20 },
 });

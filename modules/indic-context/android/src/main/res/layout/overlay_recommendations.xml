@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/recommendation_root"
+    android:layout_width="290dp"
+    android:layout_height="wrap_content"
+    android:background="@drawable/language_menu_bg"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:elevation="36dp">
+
+    <!-- Header bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:id="@+id/txt_recommendation_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="💡 Smart Replies"
+            android:textColor="#00E5FF"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.04" />
+
+        <TextView
+            android:id="@+id/btn_close_recommendations"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:gravity="center"
+            android:text="✕"
+            android:textColor="#94A3B8"
+            android:textSize="15sp"
+            android:clickable="true"
+            android:focusable="true" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/txt_recommendation_subtitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Tap to insert directly into chat"
+        android:textColor="#64748B"
+        android:textSize="10sp"
+        android:paddingBottom="8dp" />
+
+    <!-- 1. Suggestion Chip 1 -->
+    <TextView
+        android:id="@+id/chip_recommendation_1"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="34dp"
+        android:layout_marginBottom="6dp"
+        android:background="@drawable/language_pill_bg"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:text="Suggestion 1"
+        android:textColor="#FAFAFA"
+        android:textSize="12sp"
+        android:clickable="true"
+        android:focusable="true" />
+
+    <!-- 2. Suggestion Chip 2 -->
+    <TextView
+        android:id="@+id/chip_recommendation_2"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="34dp"
+        android:layout_marginBottom="6dp"
+        android:background="@drawable/language_pill_bg"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:text="Suggestion 2"
+        android:textColor="#FAFAFA"
+        android:textSize="12sp"
+        android:clickable="true"
+        android:focusable="true" />
+
+    <!-- 3. Suggestion Chip 3 -->
+    <TextView
+        android:id="@+id/chip_recommendation_3"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="34dp"
+        android:background="@drawable/language_pill_bg"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:text="Suggestion 3"
+        android:textColor="#FAFAFA"
+        android:textSize="12sp"
+        android:clickable="true"
+        android:focusable="true" />
+
+</LinearLayout>
+

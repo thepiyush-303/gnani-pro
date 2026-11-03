@@ -68,6 +68,7 @@ class IndicContextModule : Module() {
             "onVoiceTranscript",
             "onRecordingStateChanged",
             "onCopilotDisabled",
+            "onActionTriggered",
         )
 
         // ── Permissions ───────────────────────────────────────────
@@ -234,6 +235,8 @@ class IndicContextModule : Module() {
                     "capturedAtMs"  to b.capturedAtMs,
                     "nodeClassName" to b.nodeClassName,
                     "appPackage"    to b.appPackage,
+                    "sentDate"      to b.sentDate,
+                    "sentTime"      to b.sentTime,
                 )
             }
         }
@@ -251,30 +254,73 @@ class IndicContextModule : Module() {
         AsyncFunction("readInputFieldText") {
             ChatAccessibilityService.instance?.readInputFieldText() ?: ""
         }
+
+        AsyncFunction("getActiveThread") {
+            val svc = ChatAccessibilityService.instance
+            mapOf(
+                "threadTitle" to svc?.activeThreadTitle,
+                "threadId" to svc?.activeThreadId,
+            )
+        }
+
+        // ── Smart Reply & Recommendation Overlay ──────────────────
+
+        AsyncFunction("showSmartReplies") { title: String, subtitle: String?, suggestions: List<String> ->
+            OverlayService.instance?.showRecommendations(title, subtitle, suggestions)
+            Unit
+        }
+
+        AsyncFunction("hideSmartReplies") {
+            OverlayService.instance?.hideRecommendations()
+            Unit
+        }
+
+        AsyncFunction("showAiError") { title: String, message: String, retryAction: String? ->
+            OverlayService.instance?.showAiError(title, message, retryAction)
+            Unit
+        }
     }
 
     // ───────────────────────────────────────────────────────────────
     // Emit helpers — called by ChatAccessibilityService on main thread
     // ───────────────────────────────────────────────────────────────
 
-    fun emitBufferUpdated(snapshot: List<ChatBubble>) {
+    fun emitBufferUpdated(snapshot: List<ChatBubble>, threadTitle: String? = null, threadId: String? = null) {
         try {
             sendEvent(
                 "onBufferUpdated",
                 mapOf(
-                    "buffer" to snapshot.map { b ->
+                    "threadTitle"   to threadTitle,
+                    "threadId"      to threadId,
+                    "buffer"        to snapshot.map { b ->
                         mapOf(
                             "text"          to b.text,
                             "isSelf"        to b.isSelf,
                             "capturedAtMs"  to b.capturedAtMs,
                             "nodeClassName" to b.nodeClassName,
                             "appPackage"    to b.appPackage,
+                            "sentDate"      to b.sentDate,
+                            "sentTime"      to b.sentTime,
                         )
                     }
                 )
             )
         } catch (e: Exception) {
             android.util.Log.w("IndicContextModule", "emitBufferUpdated: ${e.message}")
+        }
+    }
+
+    fun emitActionTriggered(action: String, draftText: String?) {
+        try {
+            sendEvent(
+                "onActionTriggered",
+                mapOf(
+                    "action"    to action,
+                    "draftText" to (draftText ?: ""),
+                )
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("IndicContextModule", "emitActionTriggered: ${e.message}")
         }
     }
 

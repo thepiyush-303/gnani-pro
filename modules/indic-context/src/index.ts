@@ -12,14 +12,18 @@ import { EventEmitter, NativeModulesProxy, requireNativeModule } from 'expo-modu
 export interface ChatBubble {
   /** The visible text content of the chat bubble */
   text: string;
-  /** true = sent by the local user; false = received from the other party */
-  isSelf: boolean;
+  /** true = sent by the local user; false = received from the other party; null = indeterminate */
+  isSelf: boolean | null;
   /** Unix timestamp (ms) at which this bubble was captured */
   capturedAtMs: number;
   /** Android node class name, e.g. "android.widget.TextView" */
   nodeClassName: string | null;
   /** Package name of the host app, e.g. "com.whatsapp" */
   appPackage: string;
+  /** Day the message was sent (yyyy-MM-dd), resolved on-device from date dividers; null if unknown */
+  sentDate?: string | null;
+  /** Time the message was sent (HH:mm, 24h); null if unknown */
+  sentTime?: string | null;
 }
 
 export interface PermissionStatus {
@@ -40,6 +44,17 @@ export type OverlayMode = 'INPUT_BAR' | 'EDGE_SLIDER';
 
 export interface BufferUpdatedEvent {
   buffer: ChatBubble[];
+  threadTitle?: string | null;
+  threadId?: string | null;
+}
+
+export type OverlayAction = 'improve' | 'factcheck' | 'smart_replies';
+
+export interface ActionTriggeredEvent {
+  /** The action triggered by the user on the floating toolbar (or by the error card's Retry chip) */
+  action: OverlayAction;
+  /** The text currently in the input field when the action was tapped */
+  draftText?: string;
 }
 
 export interface InputFieldEvent {
@@ -151,6 +166,17 @@ export async function getSessionBuffer(): Promise<ChatBubble[]> {
   return NativeModule.getSessionBuffer();
 }
 
+/**
+ * Returns the currently active chat thread title (e.g. WhatsApp contact name)
+ * and anonymized thread ID.
+ */
+export async function getActiveThread(): Promise<{
+  threadTitle: string | null;
+  threadId: string | null;
+}> {
+  return NativeModule.getActiveThread();
+}
+
 // ─── Text Injection ───────────────────────────────────────────────────────────
 
 /**
@@ -169,6 +195,40 @@ export async function injectText(text: string): Promise<void> {
  */
 export async function readInputFieldText(): Promise<string> {
   return NativeModule.readInputFieldText();
+}
+
+// ─── Smart Reply & Recommendation Overlay ─────────────────────────────────────
+
+/**
+ * Displays a floating dark-glass card with context-aware smart replies
+ * directly anchored to the copilot pill/toolbar.
+ */
+export async function showSmartReplies(
+  title: string,
+  subtitle: string | null,
+  suggestions: string[],
+): Promise<void> {
+  return NativeModule.showSmartReplies(title, subtitle ?? null, suggestions);
+}
+
+/**
+ * Dismisses the floating smart reply card if visible.
+ */
+export async function hideSmartReplies(): Promise<void> {
+  return NativeModule.hideSmartReplies();
+}
+
+/**
+ * Shows the floating card as a notice/error (e.g. LLM unreachable, empty draft).
+ * With `retryAction`, a single "↻ Retry" chip re-emits `onActionTriggered` with
+ * that action and the current input text. Pass null for no Retry chip.
+ */
+export async function showAiError(
+  title: string,
+  message: string,
+  retryAction: OverlayAction | null,
+): Promise<void> {
+  return NativeModule.showAiError(title, message, retryAction);
 }
 
 // ─── Voice-to-Text & Gnani STT (Phase 3) ──────────────────────────────────────
@@ -292,6 +352,16 @@ export function addCopilotDisabledListener(
   return emitter.addListener('onCopilotDisabled', listener);
 }
 
+/**
+ * Fires when an action button (Improve, Fact Check, Smart Replies) is tapped on the overlay toolbar,
+ * or when the user taps Retry on an error card.
+ */
+export function addActionTriggeredListener(
+  listener: (event: ActionTriggeredEvent) => void,
+) {
+  return emitter.addListener<ActionTriggeredEvent>('onActionTriggered', listener);
+}
+
 // ─── Default export (convenience object) ─────────────────────────────────────
 
 const IndicContext = {
@@ -301,8 +371,12 @@ const IndicContext = {
   stopOverlay,
   setOverlayMode,
   getSessionBuffer,
+  getActiveThread,
   injectText,
   readInputFieldText,
+  showSmartReplies,
+  hideSmartReplies,
+  showAiError,
   setGnaniConfig,
   getGnaniConfig,
   setLanguage,
@@ -316,6 +390,7 @@ const IndicContext = {
   addVoiceTranscriptListener,
   addRecordingStateListener,
   addCopilotDisabledListener,
+  addActionTriggeredListener,
 };
 
 export default IndicContext;

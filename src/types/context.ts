@@ -1,5 +1,6 @@
 /**
  * IndicContext Assistant — Shared Type Definitions
+ * Complete Context Management System (Tiers 1, 2, 3)
  */
 
 export interface ChatBubble {
@@ -13,64 +14,113 @@ export interface ChatBubble {
   nodeClassName?: string | null;
   /** Package name of the host app (e.g. com.whatsapp, org.telegram.messenger) */
   appPackage: string;
+  /** Day the message was sent (yyyy-MM-dd), from WhatsApp date dividers; null if unknown */
+  sentDate?: string | null;
+  /** Time the message was sent (HH:mm, 24h), from the bubble's time label; null if unknown */
+  sentTime?: string | null;
 }
 
 export interface SessionBufferState {
   bubbles: ChatBubble[];
   maxCapacity: number;
   activeAppPackage: string | null;
+  currentThreadId: string | null;
+  currentThreadTitle: string | null;
 }
 
 export type ToneOption = 'casual' | 'polite' | 'respectful' | 'informative';
 
 export type TemperatureLevel = 1 | 2 | 3 | 4 | 5;
 
-export type PersonaType =
-  | 'Boss'
-  | 'Client'
-  | 'Elder'
-  | 'Friend'
-  | 'Colleague'
-  | 'Auto';
+export type HinglishIntensity = 'pure_english' | 'light_hinglish' | 'deep_indic';
 
-export interface PersonaConfig {
-  contactId: string;
-  contactName?: string;
-  persona: PersonaType;
-  customNotes?: string;
+/**
+ * Global user preferences (the USER's own style — not a contact category)
+ */
+export interface GlobalUserPersona {
+  userName: string;
+  defaultTone: ToneOption;
+  hinglishIntensity: HinglishIntensity;
+  useHonorificsByDefault: boolean;
+  autoToneCheckEnabled: boolean;
+  autoFactCheckEnabled: boolean;
+  customVocabulary: string[];
 }
 
-export interface FactCheckClaim {
-  claim: string;
-  isAccurate: boolean;
+/**
+ * Listener-Aware Tone & Disrespect Detection
+ */
+export interface ToneSensitivityResult {
+  isDisrespectful: boolean;
+  severity: 'none' | 'low' | 'medium' | 'high';
+  toneDetected: string;
+  reasons: string[];
+  suggestedDraft: string;
+  originalDraft: string;
+}
+
+/**
+ * Fact & Inconsistency Verification Result
+ */
+export interface FactConflictItem {
+  statement: string;
+  earlierStatement: string;
   explanation: string;
-  suggestedCorrection?: string;
 }
 
 export interface FactCheckResult {
+  hasConflict: boolean;
   flagged: boolean;
-  claims: FactCheckClaim[];
+  inconsistencies: FactConflictItem[];
+  claims: Array<{
+    claim: string;
+    isAccurate: boolean;
+    explanation: string;
+    suggestedCorrection?: string;
+  }>;
   summary?: string;
+  suggestedCorrection?: string;
 }
 
-export interface CulturalSensitivityConcern {
-  category: 'formality' | 'humor' | 'directness' | 'honorifics' | 'other';
-  explanation: string;
-  suggestion?: string;
+/**
+ * Thread Catch-Up Summary
+ */
+export interface ThreadSummaryResult {
+  brief: string;
+  keyPoints: string[];
+  directAsks: string[];
+  actionItems: string[];
+  messageCount: number;
 }
 
-export interface CulturalSensitivityResult {
-  flagged: boolean;
-  personaDetectedOrConfigured: PersonaType | string;
-  concerns: CulturalSensitivityConcern[];
+/**
+ * Smart Replies — 3 suggested next messages written as the user.
+ * tone / relationship / language are inferred by the LLM from the conversation.
+ */
+export interface SmartRepliesResult {
+  replies: string[];
+  /**
+   * One short line about something due / overdue / pending as of now
+   * (e.g. "Rahul said yesterday he'd send the details today, not received yet").
+   * Empty when nothing is pending.
+   */
+  followUp: string;
+  tone: string;
+  relationship: string;
+  language: string;
 }
 
-export interface PreSendResult {
-  passed: boolean;
-  factCheck?: FactCheckResult;
-  culturalSensitivity?: CulturalSensitivityResult;
+/**
+ * Improve Text — contextual rewrite of the user's draft.
+ */
+export interface ImproveTextResult {
+  improved: string;
+  alternatives: string[];
+  tone: string;
+  relationship: string;
+  note: string;
+  /** false when the LLM judged the draft already natural for this conversation. */
+  wasModified: boolean;
 }
 
-export interface IcebreakerResult {
-  suggestions: string[];
-}
+export type { ChatMessage, ChatPayload, Sender } from '../services/llm/chatPayload';

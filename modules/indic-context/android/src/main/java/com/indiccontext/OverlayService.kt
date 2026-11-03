@@ -385,6 +385,160 @@ class OverlayService : Service() {
         stopSelf()
     }
 
+    // ── Smart Reply & Recommendations Floating Card ──
+    private var recommendationView: View? = null
+    private var recommendationParams: WindowManager.LayoutParams? = null
+    private var lastShownChipLabels: List<String> = emptyList()
+    private var lastShownTitle: String = ""
+
+    /** A tappable chip on the floating card. */
+    private data class CardChip(val label: String, val onTap: () -> Unit)
+
+    /** Suggestions card: tapping a chip injects that text into the chat input. */
+    fun showRecommendations(title: String, subtitle: String?, suggestions: List<String>) {
+        if (suggestions.isEmpty()) return
+        showCard(title, subtitle, suggestions.map { text ->
+            CardChip(text) {
+                val ok = ChatAccessibilityService.instance?.injectText(text) ?: false
+                if (ok) {
+                    Toast.makeText(applicationContext, "Inserted", Toast.LENGTH_SHORT).show()
+                }
+                hideRecommendations()
+            }
+        })
+    }
+
+    /**
+     * Notice/error card (e.g. LLM unreachable, empty draft). When [retryAction]
+     * is set, a single "↻ Retry" chip re-fires that action to JS (same path as
+     * tapping the toolbar button) instead of injecting any text.
+     */
+    fun showAiError(title: String, message: String, retryAction: String?) {
+        val chips = if (retryAction.isNullOrBlank()) emptyList() else listOf(
+            CardChip("↻ Retry") {
+                hideRecommendations()
+                val draft = ChatAccessibilityService.instance?.readInputFieldText()
+                IndicContextModule.instance?.emitActionTriggered(retryAction, draft)
+            }
+        )
+        showCard(title, message, chips)
+    }
+
+    private fun bindCard(view: View, title: String, subtitle: String?, chips: List<CardChip>) {
+        view.findViewById<TextView>(R.id.txt_recommendation_title)?.text = title
+        view.findViewById<TextView>(R.id.txt_recommendation_subtitle)?.let { txtSub ->
+            if (subtitle.isNullOrBlank()) {
+                txtSub.visibility = View.GONE
+            } else {
+                txtSub.text = subtitle
+                txtSub.visibility = View.VISIBLE
+            }
+        }
+        val chipViews = listOf(
+            view.findViewById<TextView>(R.id.chip_recommendation_1),
+            view.findViewById<TextView>(R.id.chip_recommendation_2),
+            view.findViewById<TextView>(R.id.chip_recommendation_3),
+        )
+        chipViews.forEach { it?.visibility = View.GONE }
+        for (i in 0 until minOf(chips.size, chipViews.size)) {
+            val chipView = chipViews[i] ?: continue
+            val chip = chips[i]
+            chipView.text = chip.label
+            chipView.visibility = View.VISIBLE
+            chipView.setOnClickListener { chip.onTap() }
+        }
+    }
+
+    private fun showCard(title: String, subtitle: String?, chips: List<CardChip>) {
+        mainHandler.post {
+            val wm = windowManager ?: return@post
+            val labels = chips.map { it.label }
+
+            // If the identical card is already displayed, avoid rebuilding it
+            if (recommendationView != null && lastShownChipLabels == labels && lastShownTitle == title) {
+                return@post
+            }
+            lastShownChipLabels = labels
+            lastShownTitle = title
+
+            val existingView = recommendationView
+            if (existingView != null) {
+                // Update in place to prevent flicker
+                bindCard(existingView, title, subtitle, chips)
+                return@post
+            }
+
+            val view = LayoutInflater.from(this).inflate(R.layout.overlay_recommendations, null)
+            bindCard(view, title, subtitle, chips)
+            view.findViewById<View>(R.id.btn_close_recommendations)?.setOnClickListener {
+                hideRecommendations()
+            }
+
+            val density = resources.displayMetrics.density
+            val screenW = resources.displayMetrics.widthPixels
+            val screenH = resources.displayMetrics.heightPixels
+            val cardWidth = (290 * density).toInt()
+
+            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+
+            val p = WindowManager.LayoutParams(
+                cardWidth,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                type,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                val currentY = overlayParams?.y ?: (screenH / 2)
+                y = (currentY - (175 * density).toInt()).coerceIn((40 * density).toInt(), screenH - (250 * density).toInt())
+                x = if (currentEdge == Edge.RIGHT) {
+                    (screenW - cardWidth - (12 * density).toInt()).coerceAtLeast(0)
+                } else {
+                    (12 * density).toInt()
+                }
+            }
+
+            recommendationView = view
+            recommendationParams = p
+
+            try {
+                wm.addView(view, p)
+                view.alpha = 0f
+                view.scaleY = 0.95f
+                view.animate().alpha(1f).scaleY(1f).setDuration(160).start()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to show recommendation view: ${e.message}")
+            }
+        }
+    }
+
+    fun hideRecommendations() {
+        mainHandler.post {
+            lastShownChipLabels = emptyList()
+            lastShownTitle = ""
+            val wm = windowManager ?: return@post
+            val view = recommendationView ?: return@post
+            try {
+                view.animate().alpha(0f).scaleY(0.95f).setDuration(100).withEndAction {
+                    try {
+                        wm.removeView(view)
+                    } catch (e: Exception) {}
+                    if (recommendationView === view) {
+                        recommendationView = null
+                        recommendationParams = null
+                    }
+                }.start()
+            } catch (e: Exception) {
+                try { wm.removeView(view) } catch (ignore: Exception) {}
+                recommendationView = null
+                recommendationParams = null
+            }
+        }
+    }
+
     // ── Dynamic Edge Layout Reversal & Flush Bezel Fit ─────────────────
 
     private fun applyEdgeLayout(edge: Edge) {
@@ -746,15 +900,18 @@ class OverlayService : Service() {
             }
         }
 
-        // ── 2. Action Buttons (Instant Tap Response) ──
+        // ── 2. Action Buttons (Instant Tap Response & Bridge Triggers) ──
         bindQuickActionButton(view.findViewById<View>(R.id.btn_improve)) {
-            Toast.makeText(applicationContext, "✨ Improve Text (Gnani Evon) — coming soon", Toast.LENGTH_SHORT).show()
+            val draft = ChatAccessibilityService.instance?.readInputFieldText()
+            IndicContextModule.instance?.emitActionTriggered("improve", draft)
         }
         bindQuickActionButton(view.findViewById<View>(R.id.btn_factcheck)) {
-            Toast.makeText(applicationContext, "🔍 Fact Check — coming soon", Toast.LENGTH_SHORT).show()
+            val draft = ChatAccessibilityService.instance?.readInputFieldText()
+            IndicContextModule.instance?.emitActionTriggered("factcheck", draft)
         }
-        bindQuickActionButton(view.findViewById<View>(R.id.btn_icebreaker)) {
-            Toast.makeText(applicationContext, "🧊 Icebreaker — coming soon", Toast.LENGTH_SHORT).show()
+        bindQuickActionButton(view.findViewById<View>(R.id.btn_smart_replies)) {
+            val draft = ChatAccessibilityService.instance?.readInputFieldText()
+            IndicContextModule.instance?.emitActionTriggered("smart_replies", draft)
         }
 
         // ── 3. Full Draggability for the Toolbar Background ──

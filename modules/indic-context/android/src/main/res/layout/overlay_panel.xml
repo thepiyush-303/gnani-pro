@@ -58,7 +58,7 @@
         android:focusable="false"
         android:visibility="gone">
 
-        <!-- ── Action Buttons Container (✨, 🔍, 🧊, 🎙️) ── -->
+        <!-- ── Action Buttons Container (✨, 🔍, 💬, 🎙️) ── -->
         <LinearLayout
             android:id="@+id/action_buttons_container"
             android:layout_width="wrap_content"
@@ -106,20 +106,21 @@
                     android:textSize="16sp" />
             </FrameLayout>
 
-            <!-- 3. 🧊 Icebreaker -->
+            <!-- 3. 💬 Smart Replies -->
             <FrameLayout
-                android:id="@+id/btn_icebreaker"
+                android:id="@+id/btn_smart_replies"
                 android:layout_width="38dp"
                 android:layout_height="38dp"
                 android:layout_marginEnd="6dp"
                 android:background="@drawable/btn_bg_glass"
                 android:clickable="true"
-                android:focusable="true">
+                android:focusable="true"
+                android:contentDescription="Smart Replies">
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_gravity="center"
-                    android:text="🧊"
+                    android:text="💬"
                     android:textColor="#FAFAFA"
                     android:textSize="16sp" />
             </FrameLayout>

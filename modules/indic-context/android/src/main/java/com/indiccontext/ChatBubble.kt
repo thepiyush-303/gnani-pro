@@ -11,9 +11,9 @@ data class ChatBubble(
     val text: String,
 
     /**
-     * true  → this bubble was sent by the local user (right-aligned in most apps).
-     * false → this bubble was received from the other party.
-     * null  → could not be determined from the node tree (rare).
+     * true  → sent by the local user (outgoing).
+     * false → received from the contact (incoming).
+     * null  → sender could not be resolved; JS drops these before calling the LLM.
      */
     val isSelf: Boolean?,
 
@@ -25,11 +25,20 @@ data class ChatBubble(
 
     /** Package name of the host chat application, e.g. "com.whatsapp". */
     val appPackage: String,
+
+    /**
+     * Day the message was sent, `yyyy-MM-dd`, resolved from WhatsApp's date
+     * dividers / chat-list date at capture time. null = not determinable yet.
+     */
+    val sentDate: String? = null,
+
+    /** Time the message was sent, `HH:mm` (24h), from the bubble's time label. */
+    val sentTime: String? = null,
 ) {
     /**
-     * A stable deduplication key.
-     * Two bubbles with the same text and app package are considered the same
-     * logical message (position-independent to survive scrolling).
+     * Key used to line up on-screen messages with buffered ones when merging.
+     * Sender is deliberately excluded so a message whose sender was resolved
+     * on a later pass still matches (and gets its isSelf upgraded).
      */
-    val dedupeKey: String get() = "$appPackage|$isSelf|$text"
+    val matchKey: String get() = "$appPackage|$text"
 }
