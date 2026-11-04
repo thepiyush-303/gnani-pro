@@ -237,6 +237,19 @@ class IndicContextModule : Module() {
             Unit
         }
 
+        // ── 🌐 Translate ───────────────────────────────────────────
+
+        AsyncFunction("getTranslateTarget") {
+            ctx.getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+                .getString("translate_target", "en-IN") ?: "en-IN"
+        }
+
+        /** Clears/sets a toolbar button's busy state (currently only "translate"). */
+        AsyncFunction("setToolbarBusy") { action: String, busy: Boolean ->
+            if (action == "translate") OverlayService.instance?.setTranslateBusy(busy)
+            Unit
+        }
+
         AsyncFunction("isCopilotActive") {
             OverlayService.isCopilotActive && OverlayService.instance != null
         }

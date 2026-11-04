@@ -111,4 +111,13 @@ export interface ImproveTextResult {
   wasModified: boolean;
 }
 
+/** 🌐 Translate result. */
+export interface TranslateResult {
+  translation: string;
+  /** The draft was already in the target language/script. */
+  alreadyInTarget: boolean;
+}
+
+export type TranslateTarget = 'en-IN' | 'hi-IN';
+
 export type { ChatMessage, ChatPayload, Sender } from '../services/llm/chatPayload';

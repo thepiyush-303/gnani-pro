@@ -48,7 +48,7 @@ export interface BufferUpdatedEvent {
   threadId?: string | null;
 }
 
-export type OverlayAction = 'improve' | 'factcheck' | 'smart_replies';
+export type OverlayAction = 'improve' | 'factcheck' | 'smart_replies' | 'translate';
 
 export interface ActionTriggeredEvent {
   /** The action triggered by the user on the floating toolbar (or by the error card's Retry chip) */
@@ -152,6 +152,16 @@ export async function stopOverlay(): Promise<void> {
  * Changes overlay mode at runtime without restarting the service.
  * If the copilot is already active, the UI switches immediately.
  */
+/** Target language picked on the 🌐 button (hold + glide): "en-IN" | "hi-IN". */
+export async function getTranslateTarget(): Promise<string> {
+  return NativeModule.getTranslateTarget();
+}
+
+/** Sets / clears a toolbar button's busy (pulsing) state. Currently only "translate". */
+export async function setToolbarBusy(action: OverlayAction, busy: boolean): Promise<void> {
+  return NativeModule.setToolbarBusy(action, busy);
+}
+
 /** True while the overlay service is running (bubble shows inside WhatsApp chats). */
 export async function isCopilotActive(): Promise<boolean> {
   return NativeModule.isCopilotActive();
@@ -398,6 +408,8 @@ const IndicContext = {
   startOverlay,
   stopOverlay,
   isCopilotActive,
+  getTranslateTarget,
+  setToolbarBusy,
   setOverlayMode,
   getSessionBuffer,
   getActiveThread,

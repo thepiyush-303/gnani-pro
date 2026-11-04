@@ -6,15 +6,23 @@
  *
  * LLM calls happen ONLY when the user taps a toolbar button:
  *   ✨ improve       → improveText()
+ *   🌐 translate     → translateText() → replaces the message-box text
  *   💬 smart_replies → generateSmartReplies()
  * Incoming messages / reopening a chat never trigger a call (they only update
  * the buffer that those buttons read).
  */
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { ToastAndroid } from 'react-native';
 import IndicContext, { type ActionTriggeredEvent } from 'indic-context';
-import type { ChatBubble, SmartRepliesResult } from '../types/context';
-import { generateSmartReplies, improveText } from '../services/aiFeatures';
+import type { ChatBubble, SmartRepliesResult, TranslateTarget } from '../types/context';
+import {
+  generateSmartReplies,
+  improveText,
+  letterCount,
+  TRANSLATE_LANGUAGE_NAME,
+  translateText,
+} from '../services/aiFeatures';
 import { describeLlmError, getGnaniSttKey, isLlmError } from '../services/llm/llmClient';
 import { getCleanFirstName } from '../utils/contactName';
 
@@ -46,6 +54,55 @@ const Ctx = createContext<CopilotState>({
 });
 
 export const useCopilot = () => useContext(Ctx);
+
+const toast = (msg: string) => ToastAndroid.show(msg, ToastAndroid.SHORT);
+
+/**
+ * 🌐 Translate: validates the message-box text, translates it into the target
+ * picked on the button (hold + glide) and REPLACES the box text with it.
+ */
+async function handleTranslate(draftText: string | undefined) {
+  await IndicContext.setToolbarBusy('translate', true).catch(() => {});
+  try {
+    const draft = draftText?.trim() || ((await IndicContext.readInputFieldText()) || '').trim();
+    if (!draft) {
+      await IndicContext.showAiError('🌐 Translate', 'Type a message in the chat first, then tap 🌐.', null);
+      return;
+    }
+    if (letterCount(draft) < 2) {
+      await IndicContext.showAiError(
+        '🌐 Translate',
+        'That’s too short to translate. Type at least a word or two.',
+        null,
+      );
+      return;
+    }
+
+    const targetCode = ((await IndicContext.getTranslateTarget().catch(() => 'en-IN')) || 'en-IN') as TranslateTarget;
+    const target: TranslateTarget = targetCode === 'hi-IN' ? 'hi-IN' : 'en-IN';
+    const language = TRANSLATE_LANGUAGE_NAME[target];
+    const buffer = (await IndicContext.getSessionBuffer()) as ChatBubble[];
+    const threadTitle = (await IndicContext.getActiveThread())?.threadTitle ?? null;
+
+    const res = await translateText(draft, target, buffer, threadTitle);
+    if (res.alreadyInTarget) {
+      toast(`Already in ${language}`);
+      return;
+    }
+    try {
+      await IndicContext.injectText(res.translation);
+      toast(`🌐 Translated to ${language}`);
+    } catch {
+      // Couldn't write into the box: offer it as a tap-to-insert chip instead
+      await IndicContext.showSmartReplies(`🌐 ${language}`, 'Tap to insert into the message box', [res.translation]);
+    }
+  } catch (err: unknown) {
+    console.warn('[CopilotBridge] translate failed:', isLlmError(err) ? `${err.kind} ${err.message}` : err);
+    await IndicContext.showAiError('⚠️ AI unavailable', describeLlmError(err), 'translate').catch(() => {});
+  } finally {
+    await IndicContext.setToolbarBusy('translate', false).catch(() => {});
+  }
+}
 
 export function CopilotBridgeProvider({ children }: { children: React.ReactNode }) {
   const [activeChat, setActiveChat] = useState<string | null>(null);
@@ -79,6 +136,10 @@ export function CopilotBridgeProvider({ children }: { children: React.ReactNode 
     // Toolbar actions (also fired by the error card's ↻ Retry chip)
     const actionSub = IndicContext.addActionTriggeredListener(async (event: ActionTriggeredEvent) => {
       const { action } = event;
+      if (action === 'translate') {
+        await handleTranslate(event.draftText);
+        return;
+      }
       if (action !== 'improve' && action !== 'smart_replies') return;
       try {
         const buffer = (await IndicContext.getSessionBuffer()) as ChatBubble[];

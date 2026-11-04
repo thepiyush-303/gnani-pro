@@ -70,6 +70,7 @@ const USAGE: { icon: IconName; text: string }[] = [
   { icon: 'whatsapp', text: 'Open any WhatsApp chat. The bubble appears just above the message box (only inside chats).' },
   { icon: 'gesture-tap-button', text: 'Tap the bubble to open the toolbar. Touching anything else closes it again.' },
   { icon: 'creation', text: 'Type a draft and tap ✨ to improve it, or tap 💬 for smart replies. Tap a suggestion to insert it.' },
+  { icon: 'translate', text: '🌐 Tap to translate your draft to English or Hindi (it replaces the text). Hold and glide to choose the language.' },
   { icon: 'microphone-outline', text: '🎙 Tap to dictate. Hold and glide your finger to change the language.' },
   { icon: 'account-voice', text: '🗣 Tap to record, tap again to stop. Hold and glide to pick a voice, then Send.' },
   { icon: 'gesture-swipe-down', text: 'Drag the bubble to the bottom of the screen to turn the assistant off.' },

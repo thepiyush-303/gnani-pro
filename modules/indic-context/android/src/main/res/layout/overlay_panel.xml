@@ -2,7 +2,7 @@
 <!--
   overlay_panel.xml — Assistant overlay (dark glass; shown only inside a WhatsApp chat room)
     1. disk_container    — 48dp bubble with the app mark, docked to the screen edge (drag / tap to open)
-    2. toolbar_container — 52dp bar: ✨ improve · 🗣 voice changer · 💬 smart replies · 🎙 dictation | collapse
+    2. toolbar_container — 52dp bar: ✨ improve · 🌐 translate · 🗣 voice changer · 💬 smart replies · 🎙 dictation | collapse
   Glide menus (language on mic, voice on voice changer) are separate overlay windows — see GlideMenu.kt.
   Icons are Material Symbols vectors (res/drawable/ic_*.xml), tinted per action.
 -->
@@ -76,6 +76,39 @@
                     android:layout_gravity="center"
                     android:src="@drawable/ic_improve"
                     android:importantForAccessibility="no" />
+            </FrameLayout>
+
+            <!-- 🌐 Translate — tap: translate the message box text · hold + glide: target language -->
+            <FrameLayout
+                android:id="@+id/btn_translate"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/btn_bg_toolbar"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="Translate">
+                <ImageView
+                    android:id="@+id/translate_icon"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_translate"
+                    android:importantForAccessibility="no" />
+                <TextView
+                    android:id="@+id/txt_translate_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="bottom|end"
+                    android:background="@drawable/badge_lang_bg"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:paddingTop="1dp"
+                    android:paddingBottom="1dp"
+                    android:text="EN"
+                    android:textColor="#86EFAC"
+                    android:textSize="7sp"
+                    android:textStyle="bold" />
             </FrameLayout>
 
             <!-- 🗣 Voice changer — tap: record/stop · hold + glide: pick voice -->

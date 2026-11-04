@@ -44,6 +44,7 @@ const LANGUAGES: { code: string; label: string }[] = [
 
 const HOW_TO: { icon: IconName; title: string; body: string }[] = [
   { icon: 'creation', title: 'Improve', body: 'Type a draft, then tap ✨ to rewrite it in the chat’s own tone.' },
+  { icon: 'translate', title: 'Translate', body: 'Tap 🌐 to turn your draft into English or Hindi; hold and glide to choose.' },
   { icon: 'forum-outline', title: 'Smart replies', body: 'Tap 💬 for three replies that fit the conversation.' },
   { icon: 'microphone-outline', title: 'Dictate', body: 'Tap 🎙 to speak; hold and glide to change language.' },
   { icon: 'account-voice', title: 'Voice notes', body: 'Tap 🗣 to record in another voice; hold and glide to pick it.' },

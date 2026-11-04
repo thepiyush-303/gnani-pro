@@ -78,7 +78,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 2. **Overlay Display**:
    - Visibility is driven by `ChatAccessibilityService.updateChatRoomOverlay()`: chat room → `showOverlay(entryBounds)`; anything else (home, status, archived, search, channels, share picker, other apps) → `hideOverlay()` + `onLeftChatRoom()` (hides cards, cancels in-flight voice work).
-   - Toolbar buttons: ✨ Improve Text, 🗣️ Voice Changer, 💬 Smart Replies, 🎙️ dictation, and collapse. ✨ and 💬 emit `onActionTriggered` (`improve` | `smart_replies`) to JS. 🗣️ runs fully natively (`VoiceChangerController`): tap = record/stop, hold + glide = pick a voice. 🎙️: tap = dictation, hold + glide = language. Fact Check is no longer on the toolbar; only its service (`checkFactsAndInconsistencies` in `gnaniEvonLlm.ts`) remains.
+   - Toolbar buttons: ✨ Improve Text, 🌐 Translate, 🗣️ Voice Changer, 💬 Smart Replies, 🎙️ dictation, and collapse. ✨, 🌐 and 💬 emit `onActionTriggered` (`improve` | `translate` | `smart_replies`) to JS. 🌐 replaces the box text with an English or Hindi (Devanagari) translation; hold + glide picks the target (`translate_target` pref, read via `getTranslateTarget()`).
+   - Bubble position: the edge (`overlay_edge`) and drop height (`overlay_y_frac`) are saved on drop. The bubble lifts above the message box only while the keyboard would cover it. Cards are placed by measured height (`positionCard`) so they never cover the toolbar. 🗣️ runs fully natively (`VoiceChangerController`): tap = record/stop, hold + glide = pick a voice. 🎙️: tap = dictation, hold + glide = language. Fact Check is no longer on the toolbar; only its service (`checkFactsAndInconsistencies` in `gnaniEvonLlm.ts`) remains.
 
 3. **Voice-to-Text (Phase 3)**:
    - User taps microphone button in toolbar → `OverlayService.toggleVoiceRecording()`.

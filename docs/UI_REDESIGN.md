@@ -59,3 +59,36 @@ Started: 2026-11-04 · Plan: approved 2026-11-04
 - [ ] Glide menus: 10 languages, 6 voices; Home language/voice changes update the toolbar badges
 - [ ] Tutorial on first launch (fresh install or cleared data); Grant buttons; Finish turns the assistant on
 - [ ] Light/dark follows the system; launcher + notification icons show the new mark
+
+---
+
+## Round 2 (2026-11-04): position memory, 🌐 Translate, card overlap
+Feedback from the first device run.
+
+| Problem | Cause | Fix |
+|---|---|---|
+| Dragged bubble snapped back | The chat-room check calls `showOverlay(entryBounds)` on every window change (~200 ms on content changes), which re-placed it above the message box. Only the edge was saved. | `snapToNearestEdge` saves `overlay_y_frac`. `showOverlay` uses the saved height, lifting above the message box only while the keyboard would cover it. `isUserMoving` stops repositioning mid-drag and mid-snap. |
+| Card covered the toolbar | Card top = bubble y − 175 dp (fixed guess); real cards are ~230 dp+. In-place updates never moved it. | `positionCard()` measures the card and places it above the bubble/toolbar, or below if there's no room (or on the roomier side, clamped). Re-run after every in-place update and whenever the bubble moves. |
+| Wanted: translate the draft | — | 🌐 button (after ✨). **Tap** translates the box text and **replaces** it (toast confirms). **Hold + glide** picks English / Hindi (Devanagari), saved as `translate_target` and shown as a badge. Empty box or < 2 letters → explanatory card. Already in the target → toast. LLM error → retry card. |
+
+Translate details:
+- `TRANSLATE_SYSTEM_PROMPT` keeps meaning, register, names, numbers, emoji and URLs; Hindi only in Devanagari; Roman Hinglish counts as "not Hindi".
+- `translateText()` validates the script: a Hindi result needs Devanagari; "already Hindi" needs a Devanagari draft; "already English" a non-Devanagari draft. Violations become a retry card instead of a wrong insert.
+- The busy pulse is set natively on tap and cleared by JS (`setToolbarBusy`), with a 20 s native safety timeout. The toolbar doesn't auto-collapse while translating.
+- Gnani has no translation API, so this uses the configured LLM (Gemini).
+
+### Checks
+- [x] `tsc`; `compileDebugKotlin` + unit tests + `assembleDebug` (APK contains `ic_translate`)
+- [x] `ic_translate.xml` rendered with the pathData previewer
+- [x] `npm run eval:prompts` translation cases: all pass (log below)
+- [ ] On device: drop the bubble mid-screen → it stays across messages, chat switches and keyboard open/close
+- [ ] On device: 💬 / ✨ / "Other voice" (5 chips) cards never overlap the toolbar (also with the bubble near the top)
+- [ ] On device: 🌐 empty → card; "k" → too-short card; EN→HI replaced in Devanagari + toast; HI→EN; EN with EN → "Already in English"; airplane mode → retry card
+
+### Eval log (2026-11-04, gemini-3.5-flash-lite)
+- EN banter → HI: "भाई आज मैं बहुत थक गया हूँ, कल खेलते हैं ठीक है?" ✅ Devanagari, casual kept
+- HI → EN: "I will send the report by tomorrow morning." ✅
+- EN → EN: `already_in_target` ✅ (no re-translation)
+- Roman Hinglish → HI: "कल मिलते है भाई, ५ बजे स्टेशन पे" ✅ converted, time kept (Devanagari numeral)
+- Only failure in the full run: the pre-existing flaky case (a reply to a 4-day-old plan says "today"). It's unrelated to this change and was already listed as a flash-lite weak spot in `AI_OVERHAUL.md`.
+

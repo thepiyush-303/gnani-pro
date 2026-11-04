@@ -73,6 +73,10 @@ class OverlayService : Service() {
     // Edge docking & snapping
     private var currentEdge: Edge = Edge.LEFT
     private var lastTargetY = -1
+    /** Height the user dropped the bubble at, as a fraction of screen height (-1 = never moved). */
+    private var savedYFrac = -1f
+    /** True from drag start until the edge-snap animation ends: automatic repositioning must not fight the finger. */
+    @Volatile private var isUserMoving = false
     private val POSITION_THRESHOLD_PX = 10
     private val POSITION_DEBOUNCE_MS = 60L
     private var pendingPositionUpdate: Runnable? = null
@@ -98,6 +102,42 @@ class OverlayService : Service() {
     private val glideMenu: GlideMenu by lazy { GlideMenu(this, windowManager!!) }
     private var recPulse: android.animation.ObjectAnimator? = null
     private var processingPulse: android.animation.ObjectAnimator? = null
+
+    // ── 🌐 Translate (target picked by hold + glide; the LLM call runs in JS) ──
+    private data class TranslateTarget(val code: String, val badge: String, val name: String, val native: String?)
+    private val TRANSLATE_TARGETS = listOf(
+        TranslateTarget("en-IN", "EN", "English", null),
+        TranslateTarget("hi-IN", "HI", "Hindi", "हिन्दी"),
+    )
+    private var translatePulse: android.animation.ObjectAnimator? = null
+    private val translateBusyTimeout = Runnable { setTranslateBusy(false) }
+
+    private fun translateTarget(): TranslateTarget {
+        val code = getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE).getString("translate_target", "en-IN")
+        return TRANSLATE_TARGETS.firstOrNull { it.code == code } ?: TRANSLATE_TARGETS.first()
+    }
+
+    /** Busy state on 🌐 while JS translates (cleared by JS, or after 20 s as a safety net). */
+    fun setTranslateBusy(busy: Boolean) {
+        mainHandler.post {
+            mainHandler.removeCallbacks(translateBusyTimeout)
+            val btn = overlayRootView?.findViewById<View>(R.id.btn_translate)
+            translatePulse?.cancel(); translatePulse = null
+            btn?.alpha = 1f
+            if (busy && btn != null) {
+                btn.setBackgroundResource(R.drawable.btn_bg_processing)
+                translatePulse = android.animation.ObjectAnimator.ofFloat(btn, View.ALPHA, 1f, 0.45f).apply {
+                    duration = 650
+                    repeatMode = android.animation.ValueAnimator.REVERSE
+                    repeatCount = android.animation.ValueAnimator.INFINITE
+                    start()
+                }
+                mainHandler.postDelayed(translateBusyTimeout, 20_000L)
+            } else {
+                btn?.setBackgroundResource(R.drawable.btn_bg_toolbar)
+            }
+        }
+    }
 
     private data class GlideLanguage(val code: String, val badge: String, val name: String, val native: String?)
 
@@ -149,6 +189,7 @@ class OverlayService : Service() {
         val prefs = getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
         val savedEdge = prefs.getString("overlay_edge", "left") ?: "left"
         currentEdge = if (savedEdge == "right") Edge.RIGHT else Edge.LEFT
+        savedYFrac = prefs.getFloat("overlay_y_frac", -1f)
 
         activeLanguageCode = prefs.getString("gnani_language", "en-IN") ?: "en-IN"
         activeLanguageBadge = GLIDE_LANGUAGES.firstOrNull { it.code == activeLanguageCode }?.badge ?: "EN"
@@ -251,7 +292,8 @@ class OverlayService : Service() {
     /** Outside touches close the toolbar — but never while a voice note / dictation is in progress. */
     private fun maybeAutoCollapse() {
         if (!isExpanded) return
-        val busy = (::voiceChanger.isInitialized && voiceChanger.isBusy()) || isVoiceRecording() || isTranscribing
+        val busy = (::voiceChanger.isInitialized && voiceChanger.isBusy()) || isVoiceRecording() || isTranscribing ||
+            translatePulse != null
         if (!busy) collapseToDisk()
     }
 
@@ -270,23 +312,36 @@ class OverlayService : Service() {
             val screenH = resources.displayMetrics.heightPixels
             val diskH = (52 * density).toInt() // tallest state (toolbar); the 48dp bubble sits at its bottom
 
-            val targetY: Int = if (inputBounds != null && inputBounds.top > diskH + (10 * density).toInt()) {
-                (inputBounds.top - diskH - (8 * density).toInt()).coerceIn(0, screenH - diskH)
+            val gap = (8 * density).toInt()
+            val aboveInput: Int = if (inputBounds != null && inputBounds.top > diskH + (10 * density).toInt()) {
+                (inputBounds.top - diskH - gap).coerceIn(0, screenH - diskH)
             } else {
                 (screenH * 0.58f).toInt()
             }
+            // The height the user dropped the bubble at wins, unless the message box / keyboard
+            // would cover it — then sit just above the box until there's room again.
+            val targetY: Int = if (savedYFrac >= 0f) {
+                val saved = (savedYFrac * screenH).toInt().coerceIn((24 * density).toInt(), screenH - diskH)
+                if (inputBounds != null && saved + diskH > inputBounds.top - gap) aboveInput else saved
+            } else {
+                aboveInput
+            }
 
             if (isOverlayShowing && overlayRootView != null && overlayParams != null) {
+                if (isUserMoving) return@post
                 val delta = Math.abs(targetY - lastTargetY)
                 if (delta <= POSITION_THRESHOLD_PX) return@post
 
                 pendingPositionUpdate?.let { mainHandler.removeCallbacks(it) }
                 val r = Runnable {
                     if (!isOverlayShowing) return@Runnable
+                    if (isUserMoving) return@Runnable
                     overlayParams?.y = targetY
                     lastTargetY = targetY
                     try { wm.updateViewLayout(overlayRootView, overlayParams) }
                     catch (e: Exception) { Log.w(TAG, "updateViewLayout: ${e.message}") }
+                    // A visible card follows the bubble so it never ends up over the toolbar
+                    mainHandler.post { recommendationView?.let { v -> recommendationParams?.let { p -> positionCard(v, p, update = true) } } }
                 }
                 pendingPositionUpdate = r
                 mainHandler.postDelayed(r, POSITION_DEBOUNCE_MS)
@@ -339,6 +394,8 @@ class OverlayService : Service() {
         // Animators point at views of the window being removed; recreate on next show
         recPulse?.cancel(); recPulse = null
         processingPulse?.cancel(); processingPulse = null
+        translatePulse?.cancel(); translatePulse = null
+        mainHandler.removeCallbacks(translateBusyTimeout)
         val view = overlayRootView ?: return
         try {
             windowManager?.removeView(view)
@@ -349,6 +406,7 @@ class OverlayService : Service() {
             overlayParams = null
             isOverlayShowing = false
             isExpanded = false
+            isUserMoving = false
             lastTargetY = -1
             Log.i(TAG, "Overlay completely hidden.")
         }
@@ -568,8 +626,9 @@ class OverlayService : Service() {
 
             val existingView = recommendationView
             if (existingView != null) {
-                // Update in place to prevent flicker
+                // Update in place to prevent flicker — its height changes with the content, so re-place it
                 bindCard(existingView, title, subtitle, chips)
+                recommendationParams?.let { positionCard(existingView, it, update = true) }
                 return@post
             }
 
@@ -581,7 +640,6 @@ class OverlayService : Service() {
 
             val density = resources.displayMetrics.density
             val screenW = resources.displayMetrics.widthPixels
-            val screenH = resources.displayMetrics.heightPixels
             val cardWidth = (290 * density).toInt()
 
             val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
@@ -597,8 +655,6 @@ class OverlayService : Service() {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
-                val currentY = overlayParams?.y ?: (screenH / 2)
-                y = (currentY - (175 * density).toInt()).coerceIn((40 * density).toInt(), screenH - (250 * density).toInt())
                 x = if (currentEdge == Edge.RIGHT) {
                     (screenW - cardWidth - (12 * density).toInt()).coerceAtLeast(0)
                 } else {
@@ -606,6 +662,7 @@ class OverlayService : Service() {
                 }
             }
 
+            positionCard(view, p, update = false)
             recommendationView = view
             recommendationParams = p
 
@@ -617,6 +674,45 @@ class OverlayService : Service() {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to show recommendation view: ${e.message}")
             }
+        }
+    }
+
+    /**
+     * Places the card next to the bubble/toolbar using its MEASURED height:
+     * above it when there's room, else below it, else on whichever side has more
+     * space. A fixed offset used to let tall cards cover the toolbar.
+     */
+    private fun positionCard(view: View, p: WindowManager.LayoutParams, update: Boolean) {
+        val density = resources.displayMetrics.density
+        val screenH = resources.displayMetrics.heightPixels
+        val gap = (8 * density).toInt()
+        val topLimit = (32 * density).toInt()
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec((290 * density).toInt(), View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        val cardH = view.measuredHeight
+
+        val anchor = overlayRootView
+        val (anchorTop, anchorBottom) = if (anchor != null && anchor.height > 0) {
+            val loc = IntArray(2)
+            anchor.getLocationOnScreen(loc)
+            loc[1] to loc[1] + anchor.height
+        } else {
+            val y = overlayParams?.y ?: (screenH / 2)
+            y to y + (52 * density).toInt()
+        }
+
+        val above = anchorTop - gap - cardH
+        val below = anchorBottom + gap
+        p.y = when {
+            above >= topLimit -> above
+            below + cardH <= screenH - gap -> below
+            anchorTop - topLimit >= screenH - anchorBottom -> topLimit
+            else -> (screenH - cardH - gap).coerceAtLeast(topLimit)
+        }
+        if (update) {
+            try { windowManager?.updateViewLayout(view, p) } catch (e: Exception) {}
         }
     }
 
@@ -791,10 +887,14 @@ class OverlayService : Service() {
         val newEdge = if (releaseRawX < screenW / 2f) Edge.LEFT else Edge.RIGHT
         currentEdge = newEdge
 
-        // Persist edge choice
+        // Persist edge + the height the user dropped it at
+        val screenH = resources.displayMetrics.heightPixels
+        savedYFrac = (params.y.toFloat() / screenH).coerceIn(0f, 1f)
+        lastTargetY = params.y
         getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
             .edit()
             .putString("overlay_edge", if (newEdge == Edge.LEFT) "left" else "right")
+            .putFloat("overlay_y_frac", savedYFrac)
             .apply()
 
         applyEdgeLayout(newEdge)
@@ -816,6 +916,7 @@ class OverlayService : Service() {
         }
         animator.addListener(object : android.animation.AnimatorListenerAdapter() {
             override fun onAnimationEnd(animation: android.animation.Animator) {
+                isUserMoving = false
                 // Lock flush to the physical bezel
                 if (newEdge == Edge.RIGHT) {
                     params.gravity = Gravity.TOP or Gravity.END
@@ -859,6 +960,7 @@ class OverlayService : Service() {
                     if (Math.hypot(dx.toDouble(), dy.toDouble()) > 15.0) {
                         if (!isDrag) {
                             isDrag = true
+                            isUserMoving = true
                             v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(40).start()
                         }
                         if (p != null) {
@@ -954,6 +1056,7 @@ class OverlayService : Service() {
                     if (Math.hypot(dx.toDouble(), dy.toDouble()) > 8.0) {
                         if (!isDiskDrag) {
                             isDiskDrag = true
+                            isUserMoving = true
                             showDropZone()
                         }
 
@@ -1053,6 +1156,7 @@ class OverlayService : Service() {
                     val dy = ev.rawY - tbDownY
                     if (Math.hypot(dx.toDouble(), dy.toDouble()) > 10.0) {
                         isTbDrag = true
+                        isUserMoving = true
                         val p = overlayParams ?: return@setOnTouchListener false
                         val screenW = resources.displayMetrics.widthPixels
                         val screenH = resources.displayMetrics.heightPixels
@@ -1117,6 +1221,37 @@ class OverlayService : Service() {
                 val lang = GLIDE_LANGUAGES.firstOrNull { it.code == item.key } ?: return@bindGlideButton
                 applyLanguage(lang.code)
                 Toast.makeText(applicationContext, "🎙️ Language: ${lang.name}", Toast.LENGTH_SHORT).show()
+            },
+        )
+
+        val btnTranslate = rootView.findViewById<View>(R.id.btn_translate)
+        val translateBadge = rootView.findViewById<TextView>(R.id.txt_translate_badge)
+        translateBadge?.text = translateTarget().badge
+        bindGlideButton(
+            btnTranslate,
+            onTap = {
+                if (translatePulse != null) {
+                    Toast.makeText(applicationContext, "Still translating…", Toast.LENGTH_SHORT).show()
+                } else {
+                    setTranslateBusy(true)
+                    val draft = ChatAccessibilityService.instance?.readInputFieldText()
+                    IndicContextModule.instance?.emitActionTriggered("translate", draft)
+                }
+            },
+            canOpen = { translatePulse == null },
+            open = { anchor ->
+                glideMenu.show(
+                    anchor, "HOLD & GLIDE · TRANSLATE TO",
+                    TRANSLATE_TARGETS.map { GlideMenu.Item(it.code, it.name, listOfNotNull(it.native, it.badge).joinToString(" · ")) },
+                    translateTarget().code,
+                )
+            },
+            onPick = { item ->
+                val t = TRANSLATE_TARGETS.firstOrNull { it.code == item.key } ?: return@bindGlideButton
+                getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+                    .edit().putString("translate_target", t.code).apply()
+                translateBadge?.text = t.badge
+                Toast.makeText(applicationContext, "🌐 Translate to ${t.name}", Toast.LENGTH_SHORT).show()
             },
         )
 

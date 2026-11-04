@@ -7,10 +7,10 @@
  * UI can show a retry card instead of canned text.
  */
 
-import type { ChatBubble, ImproveTextResult, SmartRepliesResult } from '../types/context';
+import type { ChatBubble, ImproveTextResult, SmartRepliesResult, TranslateResult, TranslateTarget } from '../types/context';
 import { asString, asStringArray, callLlmJson, type LlmMessage } from './llm/llmClient';
 import { buildChatPayload, toLlmMessages, type ChatPayload } from './llm/chatPayload';
-import { IMPROVE_TEXT_SYSTEM_PROMPT, SMART_REPLIES_SYSTEM_PROMPT } from './llm/prompts';
+import { IMPROVE_TEXT_SYSTEM_PROMPT, SMART_REPLIES_SYSTEM_PROMPT, TRANSLATE_SYSTEM_PROMPT } from './llm/prompts';
 
 const EMPTY_SMART_REPLIES: SmartRepliesResult = {
   replies: [],
@@ -227,4 +227,59 @@ export async function improveText(
     note: improved === result.raw[0] ? result.note : 'Adjusted to avoid adding details you did not write.',
     wasModified: normKey(improved) !== normKey(trimmed),
   };
+}
+
+// ─── Translate ───────────────────────────────────────────────────────────────
+
+const DEVANAGARI = /[\u0900-\u097F]/;
+const LETTERS = /[A-Za-z\u0900-\u097F]/g;
+
+/** Letters (Latin or Devanagari) in the text; digits, punctuation and emoji don't count. */
+export function letterCount(text: string): number {
+  return (text.match(LETTERS) ?? []).length;
+}
+
+export const TRANSLATE_LANGUAGE_NAME: Record<TranslateTarget, string> = {
+  'en-IN': 'English',
+  'hi-IN': 'Hindi',
+};
+
+/**
+ * Translates the draft into English or Hindi (Devanagari), keeping its tone.
+ * Throws LlmError on failure; a Hindi result without Devanagari counts as a parse failure.
+ */
+export async function translateText(
+  draft: string,
+  target: TranslateTarget,
+  bubbles: ChatBubble[],
+  contactTitle: string | null | undefined,
+  opts: AiCallOptions = {},
+): Promise<TranslateResult> {
+  const trimmed = draft.trim();
+  if (!trimmed) throw new Error('translateText called with an empty draft');
+  const payload = {
+    ...buildChatPayload(bubbles, contactTitle, { draft: trimmed, now: opts.now, window: 8 }),
+    target_language: target === 'hi-IN' ? 'Hindi (Devanagari)' : 'English',
+  };
+
+  return callLlmJson(
+    toLlmMessages(TRANSLATE_SYSTEM_PROMPT, payload),
+    (obj) => {
+      const translation = asString(obj.translation);
+      if (!translation) throw new Error('"translation" missing or empty');
+      const alreadyInTarget = obj.already_in_target === true || normKey(translation) === normKey(trimmed);
+      // Script sanity checks: Roman Hinglish is not "already Hindi", Devanagari is not "already English"
+      if (alreadyInTarget && target === 'hi-IN' && !DEVANAGARI.test(trimmed)) {
+        throw new Error('claimed already-Hindi for a non-Devanagari draft');
+      }
+      if (alreadyInTarget && target === 'en-IN' && DEVANAGARI.test(trimmed)) {
+        throw new Error('claimed already-English for a Devanagari draft');
+      }
+      if (target === 'hi-IN' && !alreadyInTarget && !DEVANAGARI.test(translation)) {
+        throw new Error('Hindi translation is not in Devanagari');
+      }
+      return { translation, alreadyInTarget };
+    },
+    { temperature: 0.2, maxTokens: 500, thinking: 'low' },
+  );
 }
