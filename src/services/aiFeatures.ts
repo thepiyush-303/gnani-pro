@@ -239,6 +239,17 @@ export function letterCount(text: string): number {
   return (text.match(LETTERS) ?? []).length;
 }
 
+/**
+ * Gate for draft-based LLM calls (✨ Improve, 🌐 Translate). A draft is worth
+ * sending only if it has at least 3 letters AND one word of 2+ letters.
+ * Rejects "", "k", "ok", "hm", "😂😂", "1234". Tune here, not in callers.
+ */
+export function isMeaningfulDraft(text: string): boolean {
+  const t = text.trim();
+  if (letterCount(t) < 3) return false;
+  return (t.match(/[A-Za-z\u0900-\u097F]{2,}/g) ?? []).length > 0;
+}
+
 export const TRANSLATE_LANGUAGE_NAME: Record<TranslateTarget, string> = {
   'en-IN': 'English',
   'hi-IN': 'Hindi',

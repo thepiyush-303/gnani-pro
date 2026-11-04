@@ -19,7 +19,7 @@ import type { ChatBubble, SmartRepliesResult, TranslateTarget } from '../types/c
 import {
   generateSmartReplies,
   improveText,
-  letterCount,
+  isMeaningfulDraft,
   TRANSLATE_LANGUAGE_NAME,
   translateText,
 } from '../services/aiFeatures';
@@ -69,10 +69,10 @@ async function handleTranslate(draftText: string | undefined) {
       await IndicContext.showAiError('🌐 Translate', 'Type a message in the chat first, then tap 🌐.', null);
       return;
     }
-    if (letterCount(draft) < 2) {
+    if (!isMeaningfulDraft(draft)) {
       await IndicContext.showAiError(
         '🌐 Translate',
-        'That’s too short to translate. Type at least a word or two.',
+        'That’s too short to translate. Type a few words first.',
         null,
       );
       return;
@@ -151,6 +151,10 @@ export function CopilotBridgeProvider({ children }: { children: React.ReactNode 
           const draft = event.draftText?.trim() || ((await IndicContext.readInputFieldText()) || '').trim();
           if (!draft) {
             await IndicContext.showAiError('✨ Improve Text', 'Type a message in the chat first, then tap ✨.', null);
+            return;
+          }
+          if (!isMeaningfulDraft(draft)) {
+            await IndicContext.showAiError('✨ Improve Text', 'That’s too short to improve. Type a few words first.', null);
             return;
           }
           const res = await improveText(draft, buffer, threadTitle);
