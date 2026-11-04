@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- bg_ring_pill.xml - Collapsed 42x42dp disk with Dark Glassmorphism -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="oval">
-    <solid android:color="#D91E1E20" />
-    <stroke
-        android:width="1.2dp"
-        android:color="#4000E5FF" />
-    <size
-        android:width="42dp"
-        android:height="42dp" />
-</shape>
+<!-- bg_ring_pill.xml - Collapsed assistant bubble: 48dp deep-navy glass with a soft cyan ring.
+     Ripple gives touch feedback; the larger size makes it easier to hit while scrolling a chat. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#4022D3EE">
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#F0121726" />
+            <stroke android:width="1.5dp" android:color="#7022D3EE" />
+            <size android:width="48dp" android:height="48dp" />
+        </shape>
+    </item>
+</ripple>

@@ -34,18 +34,6 @@ export type TemperatureLevel = 1 | 2 | 3 | 4 | 5;
 
 export type HinglishIntensity = 'pure_english' | 'light_hinglish' | 'deep_indic';
 
-/**
- * Global user preferences (the USER's own style — not a contact category)
- */
-export interface GlobalUserPersona {
-  userName: string;
-  defaultTone: ToneOption;
-  hinglishIntensity: HinglishIntensity;
-  useHonorificsByDefault: boolean;
-  autoToneCheckEnabled: boolean;
-  autoFactCheckEnabled: boolean;
-  customVocabulary: string[];
-}
 
 /**
  * Listener-Aware Tone & Disrespect Detection

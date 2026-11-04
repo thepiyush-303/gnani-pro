@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- btn_bg_tone.xml - Tone button background: Violet tinted circle -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="oval">
-    <solid android:color="#1A8B5CF6" />
-    <stroke android:width="1dp" android:color="#338B5CF6" />
-</shape>
-

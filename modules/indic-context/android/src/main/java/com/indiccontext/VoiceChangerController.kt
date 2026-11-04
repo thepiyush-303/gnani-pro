@@ -93,6 +93,8 @@ class VoiceChangerController(
     }
 
     private var state = State.IDLE
+    /** Bumped by [cancelAll]; STT/TTS callbacks from an older generation are ignored. */
+    private var generation = 0
     private var recordStartedAt = 0L
     private val timerTick = object : Runnable {
         override fun run() {
@@ -129,6 +131,20 @@ class VoiceChangerController(
     fun canPickVoice(): Boolean = state == State.IDLE
 
     fun isRecording(): Boolean = state == State.STARTING || state == State.RECORDING
+
+    /** Recording, starting or processing — the toolbar must not auto-collapse. */
+    fun isBusy(): Boolean = state != State.IDLE
+
+    /** User left the chat room: stop recording and drop any in-flight result. */
+    fun cancelAll() {
+        if (state == State.IDLE && player == null) return
+        generation++
+        main.removeCallbacks(timerTick)
+        if (recorder.isRecording()) recorder.cancel()
+        stopPreview()
+        state = State.IDLE
+        ui.setButtonState(ButtonState.Idle(selectedVoice().badge))
+    }
 
     fun initialButtonState(): ButtonState = ButtonState.Idle(selectedVoice().badge)
 
@@ -211,8 +227,10 @@ class VoiceChangerController(
 
         state = State.PROCESSING
         ui.setButtonState(ButtonState.Processing)
+        val gen = generation
         GnaniSttClient.transcribe(file, language.first) { result ->
             main.post {
+                if (gen != generation) return@post
                 result.onSuccess { text ->
                     if (text.isBlank()) {
                         finishWithError("No speech recognised. Try again a little closer to the mic.")
@@ -234,8 +252,10 @@ class VoiceChangerController(
         state = State.PROCESSING
         ui.setButtonState(ButtonState.Processing)
         ui.hideCard()
+        val gen = generation
         GnaniTtsClient.synthesize(text, v.id, language.first, newOutputFile()) { result ->
             main.post {
+                if (gen != generation) return@post
                 state = State.IDLE
                 ui.setButtonState(ButtonState.Idle(selectedVoice().badge))
                 result.onSuccess { file ->

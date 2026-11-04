@@ -23,21 +23,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### High-Level Components
 
-1. **Expo/React Native Dashboard (`app/`)**
-   - Entry point: `app/index.tsx` (dashboard screen for configuring the copilot).
-   - Uses `expo-router` for navigation (currently single-screen stack).
-   - Manages permissions (overlay, accessibility, microphone) via `indic-context` native module.
-   - Controls overlay mode (INPUT_BAR vs EDGE_SLIDER) and voice-to-text testing.
-   - Displays live context buffer count and transcript results.
+1. **Expo/React Native app (`app/`)**. Theme follows the system (`src/ui/theme.ts`; `expo-system-ui` makes Android honour it).
+   - `app/_layout.tsx`: Stack (headers hidden) wrapped in `CopilotBridgeProvider` (`src/hooks/CopilotBridge.tsx`), the **only** place native overlay events are handled. ✨/💬 work whichever screen is open.
+   - `app/index.tsx` (Home): status + on/off, permission checklist (`src/hooks/usePermissions.ts`), current chat + Catch-up summary, speech language + default voice (shared with the toolbar's glide menus via the bridge), how-to.
+   - `app/onboarding.tsx`: 5-step tutorial (welcome, the 3 permissions with live status including Android 13+ "Allow restricted settings", using the bubble). Shown on first launch (`src/services/onboardingStore.ts`) and from Home.
+   - Shared UI: `src/ui/components.tsx`. App icon: `scripts/generateIcons.py` → `assets/*.png` → `app.json` → `npx expo prebuild --platform android`.
 
 2. **Native Android Module (`modules/indic-context/`)**
    - A local Android library packaged as an Expo module (`indic-context` dependency in `package.json`).
-   - **OverlayService.kt**: Draws the floating toolbar UI (two modes):
-     - `INPUT_BAR`: Shows toolbar above keyboard when input field is focused.
-     - `EDGE_SLIDER`: Shows a collapsed pill on screen edge; expands to toolbar on tap.
+   - **OverlayService.kt**: draws the 48dp bubble and the toolbar (vector icons `res/drawable/ic_*.xml`). The bubble shows **only inside a WhatsApp chat room**, just above the message box. The toolbar collapses back to the bubble on any outside touch (`FLAG_WATCH_OUTSIDE_TOUCH`) or keyboard-back, except while a voice note or dictation is in progress. `OverlayMode` is legacy (no-op).
    - **ChatAccessibilityService.kt**: Accessibility service that monitors UI events in supported apps (WhatsApp, Telegram) to:
      - Capture chat messages into a session buffer.
-     - Detect input field focus for positioning the overlay.
+     - Decide overlay visibility: `chatRoomInputBounds()` = active window has `conversation_contact_name` **and** `entry` (re-checked on every window change, including launcher/system UI, and throttled on content changes).
      - Inject AI-generated text back into the input field.
    - **GnaniSttClient.kt**: Handles communication with Gnani Prisma Speech-to-Text API.
    - **GnaniTtsClient.kt**: Gnani Timbre v3.0 text-to-speech (`/api/v1/tts/inference`, Ogg/Opus output, same API key as STT).
@@ -80,9 +77,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - Dashboard displays buffer count and uses buffer for AI features.
 
 2. **Overlay Display**:
-   - Dashboard controls overlay mode via `IndicContextModule.setOverlayMode()`.
-   - `OverlayService` shows/hides toolbar or edge pill based on mode and input focus events from `ChatAccessibilityService`.
-   - Toolbar buttons: ✨ Improve Text, 🗣️ Voice Changer, 💬 Smart Replies, 🎙️ dictation, and collapse. ✨ and 💬 emit `onActionTriggered` (`improve` | `smart_replies`) to JS. 🗣️ runs fully natively (`VoiceChangerController`): tap = record/stop, hold + glide = pick a voice. 🎙️: tap = dictation, hold + glide = language. Fact Check is no longer on the toolbar; its JS handler and service remain.
+   - Visibility is driven by `ChatAccessibilityService.updateChatRoomOverlay()`: chat room → `showOverlay(entryBounds)`; anything else (home, status, archived, search, channels, share picker, other apps) → `hideOverlay()` + `onLeftChatRoom()` (hides cards, cancels in-flight voice work).
+   - Toolbar buttons: ✨ Improve Text, 🗣️ Voice Changer, 💬 Smart Replies, 🎙️ dictation, and collapse. ✨ and 💬 emit `onActionTriggered` (`improve` | `smart_replies`) to JS. 🗣️ runs fully natively (`VoiceChangerController`): tap = record/stop, hold + glide = pick a voice. 🎙️: tap = dictation, hold + glide = language. Fact Check is no longer on the toolbar; only its service (`checkFactsAndInconsistencies` in `gnaniEvonLlm.ts`) remains.
 
 3. **Voice-to-Text (Phase 3)**:
    - User taps microphone button in toolbar → `OverlayService.toggleVoiceRecording()`.
@@ -91,13 +87,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - Transcript result emitted to JS via `IndicContextModule.emitVoiceTranscript()` for dashboard display.
 
 4. **AI Features**:
-   - `app/index.tsx` handles `onActionTriggered`. It builds the payload from `getSessionBuffer()` and the active thread title, calls `src/services/aiFeatures.ts`, and shows the results with `IndicContext.showSmartReplies()`. On failure it calls `showAiError(..., retryAction)` instead.
-   - Smart Replies also run automatically when the newest attributed message is from the contact. Failures there are only logged.
+   - `CopilotBridgeProvider` handles `onActionTriggered`. It builds the payload from `getSessionBuffer()` and the active thread title, calls `src/services/aiFeatures.ts`, and shows the results with `IndicContext.showSmartReplies()`. On failure it calls `showAiError(..., retryAction)` instead.
+   - **LLM calls happen only on ✨ / 💬 taps** (plus Catch-up summary on Home). Incoming messages and reopening a chat never trigger one.
    - Prompt regression check: `npm run eval:prompts`. It calls the configured provider live and makes ~11 calls, so mind the Gemini free-tier rate limit.
 
 ### Key Files to Understand
 
-- **Dashboard**: `app/index.tsx` (UI and permission logic).
+- **App**: `app/index.tsx` (Home), `app/onboarding.tsx` (tutorial), `src/hooks/CopilotBridge.tsx` (event handling), `src/ui/` (theme + components). See `docs/UI_REDESIGN.md`.
 - **Native Bridge**: `modules/indic-context/android/src/main/java/com/indiccontext/IndicContextModule.kt`.
 - **Overlay UI**: `modules/indic-context/android/src/main/java/com/indiccontext/OverlayService.kt`.
 - **Accessibility Service**: `modules/indic-context/android/src/main/java/com/indiccontext/ChatAccessibilityService.kt`.

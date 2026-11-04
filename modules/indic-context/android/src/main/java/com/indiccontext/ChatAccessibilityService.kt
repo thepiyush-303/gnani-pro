@@ -40,11 +40,13 @@ class ChatAccessibilityService : AccessibilityService() {
     private var contentCaptureDebounce: Runnable? = null
     private val CAPTURE_DEBOUNCE_MS = 800L
 
-    private var keyboardCheckPollRunnable: Runnable? = null
-    private var verifiedInputLossRunnable: Runnable? = null
-    private val VERIFIED_LOSS_DELAY_MS = 250L
+    // ── Chat-room visibility (the pill exists only inside a WhatsApp chat room) ──
+    private val CHAT_ROOM_CHECK_DELAY_MS = 120L
+    private val chatRoomCheck = Runnable { updateChatRoomOverlay() }
+    private var lastImeVisible = false
 
     // State
+    /** Package of the supported chat app whose window is active, set by [updateChatRoomOverlay]. */
     private var foregroundPkg: String? = null
 
     /** The supported chat app currently in front (e.g. "com.whatsapp" / "com.whatsapp.w4b"), if any. */
@@ -73,9 +75,6 @@ class ChatAccessibilityService : AccessibilityService() {
     /** Selects [title] in WhatsApp's share picker and taps send (see [WhatsAppAutoSender]). */
     fun startAutoSend(title: String, pkg: String, onDone: (Boolean, String) -> Unit) =
         autoSender.start(title, pkg, onDone)
-    private var inputFocused = false
-    private var isKeyboardCurrentlyOpen = false
-    private val inputBoundsRect = Rect()
     private var focusedInputNode: AccessibilityNodeInfo? = null
 
     // Thread Context (Tier 2 Listener identification)
@@ -188,21 +187,27 @@ class ChatAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val event = event ?: return
-        val pkg = event.packageName?.toString() ?: return
 
         if (!OverlayService.isCopilotActive) {
             OverlayService.instance?.hideOverlay(immediate = true)
             return
         }
 
+        // Window changes from ANY app (launcher, system UI, our dashboard, WhatsApp) re-evaluate
+        // whether a chat room is in front. This is what hides the pill on Home / Recents.
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+        ) {
+            scheduleChatRoomCheck()
+        }
+
+        val pkg = event.packageName?.toString() ?: return
         if (isKeyboard(pkg) || isSystemUi(pkg) || isOurApp(pkg)) return
 
         when (event.eventType) {
 
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                val inSupportedApp = isSupportedAppInForeground()
-
-                if (!inSupportedApp) {
+                if (!isSupportedAppInForeground()) {
                     onLeftSupportedApp()
                 } else {
                     buffer.resetIfAppChanged(pkg)
@@ -214,35 +219,20 @@ class ChatAccessibilityService : AccessibilityService() {
                             root.recycle()
                         }
                     }
-                    // If window changed within the supported app (e.g. backed out of chat to conversation list),
-                    // re-verify input bar & keyboard state immediately
-                    checkInputBarState(pkg)
-                }
-            }
-
-            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
-                if (isSupportedAppInForeground()) {
-                    checkInputBarState("com.whatsapp")
-                    scheduleKeyboardPoll("com.whatsapp")
-                } else {
-                    onLeftSupportedApp()
                 }
             }
 
             AccessibilityEvent.TYPE_VIEW_FOCUSED -> {
                 if (!isSupportedAppInForeground()) return
                 val node = event.source ?: return
-                handleFocusEvent(node, "com.whatsapp")
+                handleFocusEvent(node, pkg)
             }
 
             AccessibilityEvent.TYPE_VIEW_CLICKED -> {
                 if (!isSupportedAppInForeground()) return
                 val node = event.source ?: return
-                val isEdit = node.className?.contains("EditText", true) == true
-                if (!isEdit && inputFocused) {
-                    scheduleVerifiedInputLoss()
-                } else if (isEdit) {
-                    handleFocusEvent(node, "com.whatsapp")
+                if (node.className?.contains("EditText", true) == true) {
+                    handleFocusEvent(node, pkg)
                     val currentText = node.text?.toString() ?: ""
                     if (currentText.isNotBlank()) {
                         lastKnownInputText = currentText
@@ -276,12 +266,12 @@ class ChatAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
                 if (!isSupportedAppInForeground()) return
 
+                // In-app navigation (e.g. home → search) often fires only content changes;
+                // also keeps the pill above the input bar as the keyboard moves it.
                 val now = System.currentTimeMillis()
                 if (now - lastContentCheckTime > CONTENT_CHECK_THROTTLE_MS) {
                     lastContentCheckTime = now
-                    if (OverlayService.currentMode == OverlayMode.INPUT_BAR) {
-                        checkInputBarState("com.whatsapp")
-                    }
+                    scheduleChatRoomCheck()
                 }
 
                 contentCaptureDebounce?.let { mainHandler.removeCallbacks(it) }
@@ -298,6 +288,64 @@ class ChatAccessibilityService : AccessibilityService() {
                 contentCaptureDebounce = captureTask
                 mainHandler.postDelayed(captureTask, CAPTURE_DEBOUNCE_MS)
             }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // Chat-room visibility
+    // ───────────────────────────────────────────────────────────────
+
+    private fun scheduleChatRoomCheck() {
+        mainHandler.removeCallbacks(chatRoomCheck)
+        mainHandler.postDelayed(chatRoomCheck, CHAT_ROOM_CHECK_DELAY_MS)
+    }
+
+    /**
+     * Bounds of the message input if the ACTIVE window is a WhatsApp chat room,
+     * i.e. it has the chat header (`conversation_contact_name`) AND the message box
+     * (`entry`). Home, status, archived, search, channels, the share picker and
+     * admin-only groups don't have both → null. IDs verified on WhatsApp 2.26.
+     * Our own overlay windows are never "active" (FLAG_NOT_FOCUSABLE).
+     */
+    private fun chatRoomInputBounds(): Pair<String, Rect>? {
+        val root = try { rootInActiveWindow } catch (e: Exception) { null } ?: return null
+        try {
+            val pkg = root.packageName?.toString() ?: return null
+            if (pkg !in SUPPORTED_PACKAGES) return null
+            val header = try { root.findAccessibilityNodeInfosByViewId("$pkg:id/conversation_contact_name") } catch (e: Exception) { null }
+            val hasHeader = !header.isNullOrEmpty()
+            header?.forEach { safeRecycle(it) }
+            if (!hasHeader) return null
+            val entries = try { root.findAccessibilityNodeInfosByViewId("$pkg:id/entry") } catch (e: Exception) { null }
+                ?: return null
+            var bounds: Rect? = null
+            for (n in entries) {
+                if (bounds == null && n.isVisibleToUser) {
+                    bounds = Rect().also { n.getBoundsInScreen(it) }.takeIf { !it.isEmpty }
+                }
+                safeRecycle(n)
+            }
+            return bounds?.let { pkg to it }
+        } finally {
+            safeRecycle(root)
+        }
+    }
+
+    private fun updateChatRoomOverlay() {
+        val overlay = OverlayService.instance ?: return
+        val chat = chatRoomInputBounds()
+        if (chat != null) {
+            foregroundPkg = chat.first
+            overlay.showOverlay(chat.second)
+            // Back with the keyboard open closes the keyboard first → treat that as "close the toolbar"
+            val ime = isKeyboardVisible()
+            if (lastImeVisible && !ime) overlay.collapseToolbar()
+            lastImeVisible = ime
+        } else {
+            foregroundPkg = if (isSupportedAppInForeground()) foregroundPkg else null
+            lastImeVisible = false
+            overlay.hideOverlay()
+            overlay.onLeftChatRoom()
         }
     }
 
@@ -322,32 +370,6 @@ class ChatAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             false
         }
-    }
-
-    private fun isKeyboardReallyOpen(inputNode: AccessibilityNodeInfo?): Boolean {
-        val screenH = resources.displayMetrics.heightPixels
-        val density = resources.displayMetrics.density
-
-        // Signal 1: Check active soft-keyboard window height on screen
-        if (isKeyboardVisible()) {
-            return true
-        }
-
-        // Signal 2: Check if input field is pushed UP from screen bottom by soft keyboard
-        if (inputNode != null) {
-            val bounds = Rect()
-            try {
-                inputNode.getBoundsInScreen(bounds)
-                if (bounds.bottom > 0 && bounds.top > 0) {
-                    val distanceToBottom = screenH - bounds.bottom
-                    if (distanceToBottom > (100 * density).toInt()) {
-                        return true
-                    }
-                }
-            } catch (e: Exception) {}
-        }
-
-        return false
     }
 
     private fun findActiveEditText(): AccessibilityNodeInfo? {
@@ -414,171 +436,32 @@ class ChatAccessibilityService : AccessibilityService() {
         return fallbackEditText
     }
 
-    private fun checkInputBarState(pkg: String) {
-        if (!isSupportedAppInForeground()) {
-            onLeftSupportedApp()
-            return
-        }
-
-        val editNode = findActiveEditText()
-
-        if (editNode == null) {
-            if (inputFocused || isKeyboardCurrentlyOpen) {
-                scheduleVerifiedInputLoss()
-            }
-            return
-        }
-
-        val bounds = Rect()
-        editNode.getBoundsInScreen(bounds)
-        val keyboardOpen = isKeyboardReallyOpen(editNode)
-
-        if (keyboardOpen) {
-            cancelVerifiedInputLoss()
-            if (focusedInputNode == null || focusedInputNode !== editNode) {
-                clearFocusedNode()
-                focusedInputNode = editNode
-            }
-            inputFocused = true
-            isKeyboardCurrentlyOpen = true
-            inputBoundsRect.set(bounds)
-            OverlayService.instance?.showOverlay(Rect(bounds))
-        } else {
-            // Keyboard is CLOSED on screen -> hide overlay immediately
-            onInputLostFocus()
-        }
-    }
-
+    /** Tracks the focused message box (used by injectText / readInputFieldText). Visibility is NOT driven by focus. */
     private fun handleFocusEvent(node: AccessibilityNodeInfo, pkg: String) {
         val isEdit = node.className?.contains("EditText", true) == true
-        if (!isEdit) {
-            node.recycle()
-            return
-        }
-
         val viewId = node.viewIdResourceName?.lowercase()
-        if (viewId != null && (viewId.contains("search") || viewId.contains("subject"))) {
+        if (!isEdit || (viewId != null && (viewId.contains("search") || viewId.contains("subject")))) {
             node.recycle()
             return
         }
-
-        val bounds = Rect()
-        node.getBoundsInScreen(bounds)
-
         clearFocusedNode()
         focusedInputNode = node
-        inputFocused = true
-        inputBoundsRect.set(bounds)
-
-        if (isKeyboardReallyOpen(node)) {
-            cancelVerifiedInputLoss()
-            isKeyboardCurrentlyOpen = true
-            OverlayService.instance?.showOverlay(Rect(bounds))
-        } else {
-            scheduleKeyboardPoll(pkg)
-        }
-
-        val text = node.text?.toString() ?: ""
-        IndicContextModule.instance?.emitInputFocused(pkg, text)
-    }
-
-    private fun scheduleKeyboardPoll(pkg: String) {
-        keyboardCheckPollRunnable?.let { mainHandler.removeCallbacks(it) }
-
-        var attempts = 0
-        val maxAttempts = 20 // Poll up to 1.0s (20 x 50ms)
-
-        val r = object : Runnable {
-            override fun run() {
-                if (!isSupportedAppInForeground()) return
-
-                val node = findActiveEditText()
-                if (node != null) {
-                    try {
-                        if (isKeyboardReallyOpen(node)) {
-                            val bounds = Rect()
-                            node.getBoundsInScreen(bounds)
-                            cancelVerifiedInputLoss()
-                            clearFocusedNode()
-                            focusedInputNode = node
-                            inputFocused = true
-                            isKeyboardCurrentlyOpen = true
-                            inputBoundsRect.set(bounds)
-                            OverlayService.instance?.showOverlay(Rect(bounds))
-                            return
-                        }
-                    } catch (e: Exception) {}
-                }
-
-                attempts++
-                if (attempts < maxAttempts) {
-                    mainHandler.postDelayed(this, 50L)
-                }
-            }
-        }
-        keyboardCheckPollRunnable = r
-        mainHandler.post(r)
-    }
-
-    private fun scheduleVerifiedInputLoss() {
-        if (verifiedInputLossRunnable != null) return
-        val r = Runnable {
-            verifiedInputLossRunnable = null
-            if (!isSupportedAppInForeground()) {
-                onInputLostFocus()
-                return@Runnable
-            }
-
-            val node = findActiveEditText()
-            var stillOpen = false
-            if (node != null) {
-                try {
-                    if (isKeyboardReallyOpen(node)) {
-                        stillOpen = true
-                    }
-                } catch (e: Exception) {}
-            }
-
-            if (!stillOpen) {
-                onInputLostFocus()
-            }
-        }
-        verifiedInputLossRunnable = r
-        mainHandler.postDelayed(r, VERIFIED_LOSS_DELAY_MS)
-    }
-
-    private fun cancelVerifiedInputLoss() {
-        verifiedInputLossRunnable?.let { mainHandler.removeCallbacks(it) }
-        verifiedInputLossRunnable = null
-    }
-
-    private fun onInputLostFocus() {
-        keyboardCheckPollRunnable?.let { mainHandler.removeCallbacks(it) }
-        keyboardCheckPollRunnable = null
-        cancelVerifiedInputLoss()
-        inputFocused = false
-        isKeyboardCurrentlyOpen = false
-        clearFocusedNode()
-        OverlayService.instance?.hideOverlay()
-        IndicContextModule.instance?.emitInputBlurred(foregroundPkg ?: "")
+        IndicContextModule.instance?.emitInputFocused(pkg, node.text?.toString() ?: "")
     }
 
     private fun onLeftSupportedApp() {
         if (isSupportedAppInForeground()) {
             return
         }
-        keyboardCheckPollRunnable?.let { mainHandler.removeCallbacks(it) }
-        keyboardCheckPollRunnable = null
-        cancelVerifiedInputLoss()
         contentCaptureDebounce?.let { mainHandler.removeCallbacks(it) }
         contentCaptureDebounce = null
-        inputFocused = false
-        isKeyboardCurrentlyOpen = false
+        foregroundPkg = null
+        lastImeVisible = false
         activeThreadTitle = null
         activeThreadId = null
         clearFocusedNode()
         OverlayService.instance?.hideOverlay(immediate = true)
-        OverlayService.instance?.hideRecommendations()
+        OverlayService.instance?.onLeftChatRoom()
     }
 
     private fun clearFocusedNode() {

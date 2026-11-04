@@ -152,6 +152,12 @@ export async function stopOverlay(): Promise<void> {
  * Changes overlay mode at runtime without restarting the service.
  * If the copilot is already active, the UI switches immediately.
  */
+/** True while the overlay service is running (bubble shows inside WhatsApp chats). */
+export async function isCopilotActive(): Promise<boolean> {
+  return NativeModule.isCopilotActive();
+}
+
+/** @deprecated Visibility is now "inside a WhatsApp chat room"; this is a no-op kept for compatibility. */
 export async function setOverlayMode(mode: OverlayMode): Promise<void> {
   return NativeModule.setOverlayMode(mode);
 }
@@ -265,6 +271,28 @@ export async function getLanguage(): Promise<string> {
   return NativeModule.getLanguage();
 }
 
+// ─── Voice Changer voices ─────────────────────────────────────────────────────
+
+export interface TimbreVoice {
+  id: string;
+  gender: 'male' | 'female';
+  style: string;
+}
+
+/** The 6 Timbre v3.0 voices offered by the 🗣 voice changer. */
+export async function getVoices(): Promise<TimbreVoice[]> {
+  return NativeModule.getVoices();
+}
+
+/** The default voice used by the 🗣 button (same setting as its hold-and-glide menu). */
+export async function getVoice(): Promise<string> {
+  return NativeModule.getVoice();
+}
+
+export async function setVoice(id: string): Promise<string> {
+  return NativeModule.setVoice(id);
+}
+
 /**
  * Starts audio recording for voice-to-text.
  * Can be called from the dashboard or overlay.
@@ -369,6 +397,7 @@ const IndicContext = {
   requestMicrophonePermission,
   startOverlay,
   stopOverlay,
+  isCopilotActive,
   setOverlayMode,
   getSessionBuffer,
   getActiveThread,
@@ -381,6 +410,9 @@ const IndicContext = {
   getGnaniConfig,
   setLanguage,
   getLanguage,
+  getVoices,
+  getVoice,
+  setVoice,
   startVoiceRecording,
   stopVoiceRecording,
   isVoiceRecording,

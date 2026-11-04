@@ -30,6 +30,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -108,6 +109,9 @@ class OverlayService : Service() {
         GlideLanguage("te-IN", "TE", "Telugu", "తెలుగు"),
         GlideLanguage("ta-IN", "TA", "Tamil", "தமிழ்"),
         GlideLanguage("ml-IN", "ML", "Malayalam", "മലയാളം"),
+        GlideLanguage("gu-IN", "GU", "Gujarati", "ગુજરાતી"),
+        GlideLanguage("kn-IN", "KN", "Kannada", "ಕನ್ನಡ"),
+        GlideLanguage("pa-IN", "PA", "Punjabi", "ਪੰਜਾਬੀ"),
     )
     private var isTranscribing = false
 
@@ -197,8 +201,58 @@ class OverlayService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** Kept for bridge compatibility. Visibility no longer depends on a mode: the bubble shows inside chat rooms. */
     fun setMode(mode: OverlayMode) {
         currentMode = mode
+    }
+
+    // ── Hooks used by ChatAccessibilityService & the JS bridge ─────────
+
+    /** Collapse the toolbar back to the bubble (outside touch, keyboard-back). */
+    fun collapseToolbar() {
+        mainHandler.post { if (isExpanded && overlayRootView != null) collapseToDisk() }
+    }
+
+    /**
+     * The user left the chat room (home, status, another app…): drop cards and
+     * cancel any in-flight voice work so nothing pops up over another screen.
+     */
+    fun onLeftChatRoom() {
+        mainHandler.post {
+            hideRecommendations()
+            if (::voiceChanger.isInitialized) voiceChanger.cancelAll()
+            if (::voiceRecorder.isInitialized && voiceRecorder.isRecording()) {
+                voiceRecorder.cancel()
+                updateMicUi(isRecording = false, isTranscribing = false)
+                IndicContextModule.instance?.emitRecordingStateChanged(false)
+            }
+        }
+    }
+
+    /** Sets the speech language (toolbar glide menu or dashboard) and refreshes the 🎙 badge. */
+    fun applyLanguage(code: String): Boolean {
+        val lang = GLIDE_LANGUAGES.firstOrNull { it.code == code } ?: return false
+        activeLanguageCode = lang.code
+        activeLanguageBadge = lang.badge
+        GnaniSttClient.currentLanguage = lang.code
+        getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+            .edit().putString("gnani_language", lang.code).apply()
+        mainHandler.post { overlayRootView?.findViewById<TextView>(R.id.txt_lang_badge)?.text = lang.badge }
+        return true
+    }
+
+    /** Re-reads the default voice (changed from the dashboard) into the 🗣 badge. */
+    fun refreshVoiceBadge() {
+        if (::voiceChanger.isInitialized && voiceChanger.canPickVoice()) {
+            updateVoiceChangerUi(voiceChanger.initialButtonState())
+        }
+    }
+
+    /** Outside touches close the toolbar — but never while a voice note / dictation is in progress. */
+    private fun maybeAutoCollapse() {
+        if (!isExpanded) return
+        val busy = (::voiceChanger.isInitialized && voiceChanger.isBusy()) || isVoiceRecording() || isTranscribing
+        if (!busy) collapseToDisk()
     }
 
     // ── Show / Reposition Overlay ─────────────────────────────────────
@@ -214,10 +268,10 @@ class OverlayService : Service() {
             val wm = windowManager ?: return@post
             val density = resources.displayMetrics.density
             val screenH = resources.displayMetrics.heightPixels
-            val diskH = (44 * density).toInt()
+            val diskH = (52 * density).toInt() // tallest state (toolbar); the 48dp bubble sits at its bottom
 
             val targetY: Int = if (inputBounds != null && inputBounds.top > diskH + (10 * density).toInt()) {
-                (inputBounds.top - diskH - (4 * density).toInt()).coerceIn(0, screenH - diskH)
+                (inputBounds.top - diskH - (8 * density).toInt()).coerceIn(0, screenH - diskH)
             } else {
                 (screenH * 0.58f).toInt()
             }
@@ -596,7 +650,7 @@ class OverlayService : Service() {
         val root = overlayRootView ?: return
         val toolbar = root.findViewById<LinearLayout>(R.id.toolbar_container) ?: return
         val collapseBtn = root.findViewById<FrameLayout>(R.id.btn_collapse_handle) ?: return
-        val collapseArrow = root.findViewById<TextView>(R.id.collapse_arrow) ?: return
+        val collapseArrow = root.findViewById<ImageView>(R.id.collapse_arrow) ?: return
         val divider = root.findViewById<View>(R.id.toolbar_divider) ?: return
         val actionButtons = root.findViewById<LinearLayout>(R.id.action_buttons_container) ?: return
         val density = resources.displayMetrics.density
@@ -611,8 +665,8 @@ class OverlayService : Service() {
             toolbar.addView(divider)
             toolbar.addView(collapseBtn)
 
-            collapseArrow.text = "‹"
-            collapseBtn.setBackgroundResource(R.drawable.btn_collapse_bg_right)
+            collapseArrow.setImageResource(R.drawable.ic_chevron_left)
+            collapseBtn.setBackgroundResource(R.drawable.btn_bg_toolbar)
             collapseBtn.setPadding(0, 0, 0, 0)
             (collapseBtn.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
                 lp.marginStart = (2 * density).toInt()
@@ -622,7 +676,7 @@ class OverlayService : Service() {
 
             // Fully visible 24dp rounded left corners (no negative margins or offscreen shifts)
             toolbar.setBackgroundResource(R.drawable.overlay_bg)
-            toolbar.setPadding((6 * density).toInt(), 0, (4 * density).toInt(), 0)
+            toolbar.setPadding((6 * density).toInt(), 0, (6 * density).toInt(), 0)
 
             (toolbar.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
                 lp.gravity = Gravity.BOTTOM or Gravity.START
@@ -636,8 +690,8 @@ class OverlayService : Service() {
             toolbar.addView(divider)
             toolbar.addView(actionButtons)
 
-            collapseArrow.text = "›"
-            collapseBtn.setBackgroundResource(R.drawable.btn_collapse_bg_left)
+            collapseArrow.setImageResource(R.drawable.ic_chevron_right)
+            collapseBtn.setBackgroundResource(R.drawable.btn_bg_toolbar)
             collapseBtn.setPadding(0, 0, 0, 0)
             (collapseBtn.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
                 lp.marginStart = 0
@@ -647,7 +701,7 @@ class OverlayService : Service() {
 
             // Fully visible 24dp rounded corners, anchored directly to right bounds
             toolbar.setBackgroundResource(R.drawable.overlay_bg)
-            toolbar.setPadding((4 * density).toInt(), 0, (6 * density).toInt(), 0)
+            toolbar.setPadding((6 * density).toInt(), 0, (6 * density).toInt(), 0)
 
             (toolbar.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
                 lp.gravity = Gravity.BOTTOM or Gravity.END
@@ -859,6 +913,16 @@ class OverlayService : Service() {
 
         langBadge?.text = activeLanguageBadge
 
+        // ── 0. Any touch outside the overlay (chat, keyboard, other windows) closes the toolbar ──
+        view.setOnTouchListener { _, ev ->
+            if (ev.actionMasked == MotionEvent.ACTION_OUTSIDE) {
+                maybeAutoCollapse()
+                true
+            } else {
+                false
+            }
+        }
+
         // ── 1. Full Draggability for the Disk (with Drop Zone & Drag-to-Disable) ──
         var diskDownX = 0f
         var diskDownY = 0f
@@ -880,6 +944,7 @@ class OverlayService : Service() {
 
                     isDiskDrag = false
                     isHoveringDropZone = false
+                    diskContainer.animate().scaleX(0.92f).scaleY(0.92f).setDuration(70).start()
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -924,6 +989,7 @@ class OverlayService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
+                    diskContainer.animate().scaleX(1f).scaleY(1f).setDuration(90).start()
                     if (isDiskDrag) {
                         val shouldDisable = isHoveringDropZone
                         hideDropZone()
@@ -939,6 +1005,7 @@ class OverlayService : Service() {
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> {
+                    diskContainer.animate().scaleX(1f).scaleY(1f).setDuration(90).start()
                     hideDropZone()
                     if (isDiskDrag) {
                         snapToNearestEdge(ev.rawX)
@@ -1048,12 +1115,7 @@ class OverlayService : Service() {
             },
             onPick = { item ->
                 val lang = GLIDE_LANGUAGES.firstOrNull { it.code == item.key } ?: return@bindGlideButton
-                activeLanguageCode = lang.code
-                activeLanguageBadge = lang.badge
-                GnaniSttClient.currentLanguage = lang.code
-                langBadge?.text = lang.badge
-                getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
-                    .edit().putString("gnani_language", lang.code).apply()
+                applyLanguage(lang.code)
                 Toast.makeText(applicationContext, "🎙️ Language: ${lang.name}", Toast.LENGTH_SHORT).show()
             },
         )
@@ -1216,22 +1278,22 @@ class OverlayService : Service() {
 
         overlayRootView?.let { root ->
             val micContainer = root.findViewById<View>(R.id.btn_mic)
-            val micIconText = root.findViewById<TextView>(R.id.mic_icon_text)
+            val micIcon = root.findViewById<ImageView>(R.id.mic_icon)
 
             when {
                 isRecording -> {
                     micContainer?.setBackgroundResource(R.drawable.btn_bg_mic_recording)
-                    micIconText?.text = "🔴"
+                    micIcon?.setImageResource(R.drawable.ic_stop)
                     micContainer?.alpha = 1.0f
                 }
                 isTranscribing -> {
-                    micContainer?.setBackgroundResource(R.drawable.btn_bg_glass)
-                    micIconText?.text = "..."
-                    micContainer?.alpha = 0.5f
+                    micContainer?.setBackgroundResource(R.drawable.btn_bg_processing)
+                    micIcon?.setImageResource(R.drawable.ic_hourglass)
+                    micContainer?.alpha = 0.8f
                 }
                 else -> {
-                    micContainer?.setBackgroundResource(R.drawable.btn_bg_glass)
-                    micIconText?.text = "🎙️"
+                    micContainer?.setBackgroundResource(R.drawable.btn_bg_toolbar)
+                    micIcon?.setImageResource(R.drawable.ic_mic)
                     micContainer?.alpha = 1.0f
                 }
             }
@@ -1243,7 +1305,7 @@ class OverlayService : Service() {
         mainHandler.post {
             val root = overlayRootView ?: return@post
             val btn = root.findViewById<View>(R.id.btn_voice_changer) ?: return@post
-            val icon = root.findViewById<TextView>(R.id.voice_changer_icon)
+            val icon = root.findViewById<ImageView>(R.id.voice_changer_icon)
             val badge = root.findViewById<TextView>(R.id.txt_voice_badge)
             val recState = root.findViewById<View>(R.id.voice_rec_state)
             val dot = root.findViewById<View>(R.id.voice_rec_dot)
@@ -1277,11 +1339,11 @@ class OverlayService : Service() {
                 }
                 is VoiceChangerController.ButtonState.Processing -> {
                     recPulse?.cancel(); recPulse = null
-                    setWidth(42)
+                    setWidth(40)
                     btn.setBackgroundResource(R.drawable.btn_bg_processing)
                     recState?.visibility = View.GONE
                     icon?.visibility = View.VISIBLE
-                    icon?.text = "⏳"
+                    icon?.setImageResource(R.drawable.ic_hourglass)
                     badge?.visibility = View.VISIBLE
                     if (processingPulse == null) {
                         processingPulse = android.animation.ObjectAnimator.ofFloat(btn, View.ALPHA, 1f, 0.45f).apply {
@@ -1297,11 +1359,11 @@ class OverlayService : Service() {
                     processingPulse?.cancel(); processingPulse = null
                     btn.alpha = 1f
                     dot?.alpha = 1f
-                    setWidth(42)
-                    btn.setBackgroundResource(R.drawable.btn_bg_glass)
+                    setWidth(40)
+                    btn.setBackgroundResource(R.drawable.btn_bg_toolbar)
                     recState?.visibility = View.GONE
                     icon?.visibility = View.VISIBLE
-                    icon?.text = "🗣️"
+                    icon?.setImageResource(R.drawable.ic_voice_changer)
                     badge?.visibility = View.VISIBLE
                     badge?.text = state.voiceBadge
                 }
@@ -1334,7 +1396,8 @@ class OverlayService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {
             if (currentEdge == Edge.RIGHT) {
@@ -1372,7 +1435,7 @@ class OverlayService : Service() {
         return builder
             .setContentTitle("IndicContext Copilot")
             .setContentText("Active in WhatsApp.")
-            .setSmallIcon(android.R.drawable.ic_menu_edit)
+            .setSmallIcon(R.drawable.ic_notification)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPi)
             .setOngoing(true)
             .build()

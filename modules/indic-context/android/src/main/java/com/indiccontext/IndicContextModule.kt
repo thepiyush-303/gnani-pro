@@ -119,15 +119,42 @@ class IndicContextModule : Module() {
 
         AsyncFunction("setLanguage") { lang: String ->
             if (lang.isNotBlank()) {
-                GnaniSttClient.currentLanguage = lang
-                ctx.getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
-                    .edit().putString("gnani_language", lang).apply()
+                // Running overlay: also refreshes the 🎙 badge. Otherwise just persist.
+                val applied = OverlayService.instance?.applyLanguage(lang) ?: false
+                if (!applied) {
+                    GnaniSttClient.currentLanguage = lang
+                    ctx.getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+                        .edit().putString("gnani_language", lang).apply()
+                }
             }
             GnaniSttClient.currentLanguage
         }
 
         AsyncFunction("getLanguage") {
-            GnaniSttClient.currentLanguage
+            ctx.getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+                .getString("gnani_language", null) ?: GnaniSttClient.currentLanguage
+        }
+
+        // ── Voice Changer voices (Timbre v3.0) ────────────────────
+
+        AsyncFunction("getVoices") {
+            VoiceChangerController.VOICES.map { v ->
+                mapOf("id" to v.id, "gender" to (if (v.male) "male" else "female"), "style" to v.style)
+            }
+        }
+
+        AsyncFunction("getVoice") {
+            val id = ctx.getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE).getString("tts_voice", null)
+            (VoiceChangerController.VOICES.firstOrNull { it.id == id } ?: VoiceChangerController.VOICES.first()).id
+        }
+
+        AsyncFunction("setVoice") { id: String ->
+            val v = VoiceChangerController.VOICES.firstOrNull { it.id == id }
+                ?: throw Exception("Unknown voice: $id")
+            ctx.getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+                .edit().putString("tts_voice", v.id).apply()
+            OverlayService.instance?.refreshVoiceBadge()
+            v.id
         }
 
         // ── Voice Recording & STT Control (Phase 3) ───────────────
@@ -208,6 +235,10 @@ class IndicContextModule : Module() {
             else
                 ctx.startService(intent)
             Unit
+        }
+
+        AsyncFunction("isCopilotActive") {
+            OverlayService.isCopilotActive && OverlayService.instance != null
         }
 
         AsyncFunction("stopOverlay") {
