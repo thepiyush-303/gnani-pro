@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- btn_bg_toolbar.xml - 40dp circular toolbar button with ripple feedback -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#40FFFFFF">
+    <item android:id="@android:id/mask">
+        <shape android:shape="oval">
+            <solid android:color="#FFFFFFFF" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#14FFFFFF" />
+            <stroke android:width="1dp" android:color="#1AFFFFFF" />
+        </shape>
+    </item>
+</ripple>

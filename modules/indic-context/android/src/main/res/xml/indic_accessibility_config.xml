@@ -7,6 +7,8 @@
   - canRetrieveWindowContent: REQUIRED to walk the node tree and read TextView text.
   - notificationTimeout: 100ms - fast enough to capture messages as they appear.
   - packageNames: Restricts the service to only these apps (performance + privacy).
+  - canPerformGestures: lets the Voice Changer tap WhatsApp's share-picker row when the
+    row doesn't accept ACTION_CLICK (direct send to the open chat).
 
   This file is copied into android/app/src/main/res/xml/ by the config plugin
   during `npx expo prebuild`.
@@ -17,6 +19,7 @@
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds"
     android:canRetrieveWindowContent="true"
+    android:canPerformGestures="true"
     android:description="@string/accessibility_service_description"
     android:notificationTimeout="50"
     android:settingsActivity=".MainActivity" />

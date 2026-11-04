@@ -10,7 +10,7 @@
  */
 
 import type { ChatBubble } from '../src/types/context';
-import { generateSmartReplies, improveText } from '../src/services/aiFeatures';
+import { generateSmartReplies, improveText, translateText } from '../src/services/aiFeatures';
 import { buildChatPayload } from '../src/services/llm/chatPayload';
 import { isLlmError } from '../src/services/llm/llmClient';
 
@@ -238,7 +238,36 @@ async function main() {
     /today|tomorrow|promised|pushes/i.test(stale.note) ? pass('note flags the timing conflict') : fail('no heads-up about timing');
   }
 
-  // 6. Empty conversation short-circuits without a network call
+  // 6. Translate
+  const DEV = /[\u0900-\u097F]/;
+  const enHi = await attempt('Translate · English banter → Hindi', () =>
+    translateText('bro I am so tired today, lets just play tomorrow ok?', 'hi-IN', BANTER_CHAT, 'Ashmit'));
+  if (enHi) {
+    console.log(`   → ${enHi.translation}`);
+    DEV.test(enHi.translation) ? pass('Devanagari output') : fail('Hindi output not in Devanagari');
+    /आप|कृपया/.test(enHi.translation) ? fail('banter turned formal (आप/कृपया)') : pass('kept the casual register');
+  }
+  const hiEn = await attempt('Translate · Hindi → English', () =>
+    translateText('मैं कल सुबह तक रिपोर्ट भेज दूँगा', 'en-IN', BOSS_CHAT, 'Rajesh'));
+  if (hiEn) {
+    console.log(`   → ${hiEn.translation}`);
+    !DEV.test(hiEn.translation) && /report/i.test(hiEn.translation) ? pass('English, meaning kept') : fail('bad English translation');
+  }
+  const same = await attempt('Translate · English → English (already)', () =>
+    translateText('See you at the station at 5', 'en-IN', [], null));
+  if (same) {
+    console.log(`   → already=${same.alreadyInTarget} ${same.translation}`);
+    same.alreadyInTarget ? pass('detected already in English') : fail('re-translated English to English');
+  }
+  const romanHi = await attempt('Translate · Roman Hinglish → Hindi (must convert)', () =>
+    translateText('kal milte hai bhai, 5 baje station pe', 'hi-IN', BANTER_CHAT, 'Ashmit'));
+  if (romanHi) {
+    console.log(`   → ${romanHi.translation}`);
+    !romanHi.alreadyInTarget && DEV.test(romanHi.translation) ? pass('Hinglish converted to Devanagari') : fail('Hinglish treated as already Hindi');
+    /5/.test(romanHi.translation) || /५/.test(romanHi.translation) ? pass('kept the time') : fail('dropped the time');
+  }
+
+  // 7. Empty conversation short-circuits without a network call
   const empty = await generateSmartReplies([], 'Nobody');
   empty.replies.length === 0 ? pass('\nempty chat → no replies, no call') : fail('empty chat produced replies');
 

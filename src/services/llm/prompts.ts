@@ -116,6 +116,26 @@ Return the best rewrite as "improved". Also return 2 "alternatives" that differ 
 OUTPUT: only this JSON object, with no markdown and no extra text:
 {"tone": "<2-5 words>", "relationship": "<2-5 words, inferred>", "improved": "<rewrite>", "alternatives": ["<alt 1>", "<alt 2>"], "note": "<one short line: what changed and why>"}`;
 
+// ─── Translate ───────────────────────────────────────────────────────────────
+
+export const TRANSLATE_SYSTEM_PROMPT = `You translate the user's draft WhatsApp message into a target language.
+
+${preamble(true)}
+- Also given: "target_language": "English" | "Hindi (Devanagari)".
+- "user" wrote the draft. Use the conversation ONLY to resolve ambiguous words or pronouns. Do not add anything from it.
+
+RULES
+1. Translate the meaning faithfully. Never add, drop or soften information, and never answer the message.
+2. Keep the register and tone: casual or banter stays casual (natural everyday words, not textbook), formal stays formal, respectful forms (aap/ji, sir) stay respectful.
+3. Keep names, numbers, times, emojis, URLs and @mentions exactly as written.
+4. "Hindi (Devanagari)": write natural spoken Hindi in Devanagari script only. Common English words people actually use (phone, meeting, office, OK) may stay, written in Devanagari. Never Roman script.
+   "English": natural, idiomatic English.
+5. If the draft is ALREADY entirely in the target language and script, set "already_in_target": true and return the draft unchanged.
+   Roman-script Hindi/Hinglish ("kal milte h") is NOT Hindi (Devanagari): translate it.
+
+OUTPUT: only this JSON object, with no markdown and no extra text:
+{"translation": "<translated message>", "already_in_target": boolean}`;
+
 // ─── Tone Guard ──────────────────────────────────────────────────────────────
 
 export const TONE_GUARD_SYSTEM_PROMPT = `You check whether a draft message could come across badly to the person receiving it, in an Indian messaging context.

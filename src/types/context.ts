@@ -34,18 +34,6 @@ export type TemperatureLevel = 1 | 2 | 3 | 4 | 5;
 
 export type HinglishIntensity = 'pure_english' | 'light_hinglish' | 'deep_indic';
 
-/**
- * Global user preferences (the USER's own style — not a contact category)
- */
-export interface GlobalUserPersona {
-  userName: string;
-  defaultTone: ToneOption;
-  hinglishIntensity: HinglishIntensity;
-  useHonorificsByDefault: boolean;
-  autoToneCheckEnabled: boolean;
-  autoFactCheckEnabled: boolean;
-  customVocabulary: string[];
-}
 
 /**
  * Listener-Aware Tone & Disrespect Detection
@@ -122,5 +110,14 @@ export interface ImproveTextResult {
   /** false when the LLM judged the draft already natural for this conversation. */
   wasModified: boolean;
 }
+
+/** 🌐 Translate result. */
+export interface TranslateResult {
+  translation: string;
+  /** The draft was already in the target language/script. */
+  alreadyInTarget: boolean;
+}
+
+export type TranslateTarget = 'en-IN' | 'hi-IN';
 
 export type { ChatMessage, ChatPayload, Sender } from '../services/llm/chatPayload';

@@ -30,6 +30,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -72,6 +73,10 @@ class OverlayService : Service() {
     // Edge docking & snapping
     private var currentEdge: Edge = Edge.LEFT
     private var lastTargetY = -1
+    /** Height the user dropped the bubble at, as a fraction of screen height (-1 = never moved). */
+    private var savedYFrac = -1f
+    /** True from drag start until the edge-snap animation ends: automatic repositioning must not fight the finger. */
+    @Volatile private var isUserMoving = false
     private val POSITION_THRESHOLD_PX = 10
     private val POSITION_DEBOUNCE_MS = 60L
     private var pendingPositionUpdate: Runnable? = null
@@ -89,6 +94,65 @@ class OverlayService : Service() {
 
     // ── Voice Recorder ──
     private lateinit var voiceRecorder: VoiceRecorder
+
+    // ── Voice Changer (🗣️ button) ──
+    private lateinit var voiceChanger: VoiceChangerController
+
+    // ── Hold-and-glide pickers (🎙️ language, 🗣️ voice) — own overlay window ──
+    private val glideMenu: GlideMenu by lazy { GlideMenu(this, windowManager!!) }
+    private var recPulse: android.animation.ObjectAnimator? = null
+    private var processingPulse: android.animation.ObjectAnimator? = null
+
+    // ── 🌐 Translate (target picked by hold + glide; the LLM call runs in JS) ──
+    private data class TranslateTarget(val code: String, val badge: String, val name: String, val native: String?)
+    private val TRANSLATE_TARGETS = listOf(
+        TranslateTarget("en-IN", "EN", "English", null),
+        TranslateTarget("hi-IN", "HI", "Hindi", "हिन्दी"),
+    )
+    private var translatePulse: android.animation.ObjectAnimator? = null
+    private val translateBusyTimeout = Runnable { setTranslateBusy(false) }
+
+    private fun translateTarget(): TranslateTarget {
+        val code = getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE).getString("translate_target", "en-IN")
+        return TRANSLATE_TARGETS.firstOrNull { it.code == code } ?: TRANSLATE_TARGETS.first()
+    }
+
+    /** Busy state on 🌐 while JS translates (cleared by JS, or after 20 s as a safety net). */
+    fun setTranslateBusy(busy: Boolean) {
+        mainHandler.post {
+            mainHandler.removeCallbacks(translateBusyTimeout)
+            val btn = overlayRootView?.findViewById<View>(R.id.btn_translate)
+            translatePulse?.cancel(); translatePulse = null
+            btn?.alpha = 1f
+            if (busy && btn != null) {
+                btn.setBackgroundResource(R.drawable.btn_bg_processing)
+                translatePulse = android.animation.ObjectAnimator.ofFloat(btn, View.ALPHA, 1f, 0.45f).apply {
+                    duration = 650
+                    repeatMode = android.animation.ValueAnimator.REVERSE
+                    repeatCount = android.animation.ValueAnimator.INFINITE
+                    start()
+                }
+                mainHandler.postDelayed(translateBusyTimeout, 20_000L)
+            } else {
+                btn?.setBackgroundResource(R.drawable.btn_bg_toolbar)
+            }
+        }
+    }
+
+    private data class GlideLanguage(val code: String, val badge: String, val name: String, val native: String?)
+
+    private val GLIDE_LANGUAGES = listOf(
+        GlideLanguage("en-IN", "EN", "English", null),
+        GlideLanguage("hi-IN", "HI", "Hindi", "हिन्दी"),
+        GlideLanguage("mr-IN", "MR", "Marathi", "मराठी"),
+        GlideLanguage("bn-IN", "BN", "Bangla", "বাংলা"),
+        GlideLanguage("te-IN", "TE", "Telugu", "తెలుగు"),
+        GlideLanguage("ta-IN", "TA", "Tamil", "தமிழ்"),
+        GlideLanguage("ml-IN", "ML", "Malayalam", "മലയാളം"),
+        GlideLanguage("gu-IN", "GU", "Gujarati", "ગુજરાતી"),
+        GlideLanguage("kn-IN", "KN", "Kannada", "ಕನ್ನಡ"),
+        GlideLanguage("pa-IN", "PA", "Punjabi", "ਪੰਜਾਬੀ"),
+    )
     private var isTranscribing = false
 
     // ── Badge Counter (Silent background tracking, no UI badges) ──
@@ -125,19 +189,20 @@ class OverlayService : Service() {
         val prefs = getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
         val savedEdge = prefs.getString("overlay_edge", "left") ?: "left"
         currentEdge = if (savedEdge == "right") Edge.RIGHT else Edge.LEFT
+        savedYFrac = prefs.getFloat("overlay_y_frac", -1f)
 
         activeLanguageCode = prefs.getString("gnani_language", "en-IN") ?: "en-IN"
-        activeLanguageBadge = when (activeLanguageCode) {
-            "hi-IN" -> "HI"
-            "mr-IN" -> "MR"
-            "bn-IN" -> "BN"
-            "te-IN" -> "TE"
-            "ta-IN" -> "TA"
-            "ml-IN" -> "ML"
-            else -> "EN"
-        }
+        activeLanguageBadge = GLIDE_LANGUAGES.firstOrNull { it.code == activeLanguageCode }?.badge ?: "EN"
         GnaniSttClient.currentLanguage = activeLanguageCode
 
+        voiceChanger = VoiceChangerController(applicationContext, object : VoiceChangerController.Ui {
+            override fun showCard(title: String, subtitle: String?, actions: List<Pair<String, () -> Unit>>) =
+                this@OverlayService.showCard(title, subtitle, actions.map { (label, onTap) -> CardChip(label, onTap) })
+            override fun hideCard() = hideRecommendations()
+            override fun setButtonState(state: VoiceChangerController.ButtonState) = updateVoiceChangerUi(state)
+            override fun currentLanguage() = activeLanguageCode to activeLanguageBadge
+            override fun isDictationRecording() = isVoiceRecording()
+        })
         voiceRecorder = VoiceRecorder(applicationContext)
         voiceRecorder.onTimeoutListener = {
             mainHandler.post {
@@ -166,6 +231,7 @@ class OverlayService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isCopilotActive = false
+        if (::voiceChanger.isInitialized) voiceChanger.release()
         if (::voiceRecorder.isInitialized && voiceRecorder.isRecording()) {
             voiceRecorder.cancel()
         }
@@ -176,8 +242,59 @@ class OverlayService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** Kept for bridge compatibility. Visibility no longer depends on a mode: the bubble shows inside chat rooms. */
     fun setMode(mode: OverlayMode) {
         currentMode = mode
+    }
+
+    // ── Hooks used by ChatAccessibilityService & the JS bridge ─────────
+
+    /** Collapse the toolbar back to the bubble (outside touch, keyboard-back). */
+    fun collapseToolbar() {
+        mainHandler.post { if (isExpanded && overlayRootView != null) collapseToDisk() }
+    }
+
+    /**
+     * The user left the chat room (home, status, another app…): drop cards and
+     * cancel any in-flight voice work so nothing pops up over another screen.
+     */
+    fun onLeftChatRoom() {
+        mainHandler.post {
+            hideRecommendations()
+            if (::voiceChanger.isInitialized) voiceChanger.cancelAll()
+            if (::voiceRecorder.isInitialized && voiceRecorder.isRecording()) {
+                voiceRecorder.cancel()
+                updateMicUi(isRecording = false, isTranscribing = false)
+                IndicContextModule.instance?.emitRecordingStateChanged(false)
+            }
+        }
+    }
+
+    /** Sets the speech language (toolbar glide menu or dashboard) and refreshes the 🎙 badge. */
+    fun applyLanguage(code: String): Boolean {
+        val lang = GLIDE_LANGUAGES.firstOrNull { it.code == code } ?: return false
+        activeLanguageCode = lang.code
+        activeLanguageBadge = lang.badge
+        GnaniSttClient.currentLanguage = lang.code
+        getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+            .edit().putString("gnani_language", lang.code).apply()
+        mainHandler.post { overlayRootView?.findViewById<TextView>(R.id.txt_lang_badge)?.text = lang.badge }
+        return true
+    }
+
+    /** Re-reads the default voice (changed from the dashboard) into the 🗣 badge. */
+    fun refreshVoiceBadge() {
+        if (::voiceChanger.isInitialized && voiceChanger.canPickVoice()) {
+            updateVoiceChangerUi(voiceChanger.initialButtonState())
+        }
+    }
+
+    /** Outside touches close the toolbar — but never while a voice note / dictation is in progress. */
+    private fun maybeAutoCollapse() {
+        if (!isExpanded) return
+        val busy = (::voiceChanger.isInitialized && voiceChanger.isBusy()) || isVoiceRecording() || isTranscribing ||
+            translatePulse != null
+        if (!busy) collapseToDisk()
     }
 
     // ── Show / Reposition Overlay ─────────────────────────────────────
@@ -193,25 +310,38 @@ class OverlayService : Service() {
             val wm = windowManager ?: return@post
             val density = resources.displayMetrics.density
             val screenH = resources.displayMetrics.heightPixels
-            val diskH = (44 * density).toInt()
+            val diskH = (52 * density).toInt() // tallest state (toolbar); the 48dp bubble sits at its bottom
 
-            val targetY: Int = if (inputBounds != null && inputBounds.top > diskH + (10 * density).toInt()) {
-                (inputBounds.top - diskH - (4 * density).toInt()).coerceIn(0, screenH - diskH)
+            val gap = (8 * density).toInt()
+            val aboveInput: Int = if (inputBounds != null && inputBounds.top > diskH + (10 * density).toInt()) {
+                (inputBounds.top - diskH - gap).coerceIn(0, screenH - diskH)
             } else {
                 (screenH * 0.58f).toInt()
             }
+            // The height the user dropped the bubble at wins, unless the message box / keyboard
+            // would cover it — then sit just above the box until there's room again.
+            val targetY: Int = if (savedYFrac >= 0f) {
+                val saved = (savedYFrac * screenH).toInt().coerceIn((24 * density).toInt(), screenH - diskH)
+                if (inputBounds != null && saved + diskH > inputBounds.top - gap) aboveInput else saved
+            } else {
+                aboveInput
+            }
 
             if (isOverlayShowing && overlayRootView != null && overlayParams != null) {
+                if (isUserMoving) return@post
                 val delta = Math.abs(targetY - lastTargetY)
                 if (delta <= POSITION_THRESHOLD_PX) return@post
 
                 pendingPositionUpdate?.let { mainHandler.removeCallbacks(it) }
                 val r = Runnable {
                     if (!isOverlayShowing) return@Runnable
+                    if (isUserMoving) return@Runnable
                     overlayParams?.y = targetY
                     lastTargetY = targetY
                     try { wm.updateViewLayout(overlayRootView, overlayParams) }
                     catch (e: Exception) { Log.w(TAG, "updateViewLayout: ${e.message}") }
+                    // A visible card follows the bubble so it never ends up over the toolbar
+                    mainHandler.post { recommendationView?.let { v -> recommendationParams?.let { p -> positionCard(v, p, update = true) } } }
                 }
                 pendingPositionUpdate = r
                 mainHandler.postDelayed(r, POSITION_DEBOUNCE_MS)
@@ -260,6 +390,12 @@ class OverlayService : Service() {
     private fun performHideOverlay() {
         pendingHideRunnable = null
         hideDropZone()
+        if (windowManager != null) glideMenu.dismissNow()
+        // Animators point at views of the window being removed; recreate on next show
+        recPulse?.cancel(); recPulse = null
+        processingPulse?.cancel(); processingPulse = null
+        translatePulse?.cancel(); translatePulse = null
+        mainHandler.removeCallbacks(translateBusyTimeout)
         val view = overlayRootView ?: return
         try {
             windowManager?.removeView(view)
@@ -270,6 +406,7 @@ class OverlayService : Service() {
             overlayParams = null
             isOverlayShowing = false
             isExpanded = false
+            isUserMoving = false
             lastTargetY = -1
             Log.i(TAG, "Overlay completely hidden.")
         }
@@ -393,6 +530,7 @@ class OverlayService : Service() {
 
     /** A tappable chip on the floating card. */
     private data class CardChip(val label: String, val onTap: () -> Unit)
+    private val EXTRA_CHIP_TAG = "extra_chip"
 
     /** Suggestions card: tapping a chip injects that text into the chat input. */
     fun showRecommendations(title: String, subtitle: String?, suggestions: List<String>) {
@@ -434,11 +572,36 @@ class OverlayService : Service() {
                 txtSub.visibility = View.VISIBLE
             }
         }
-        val chipViews = listOf(
-            view.findViewById<TextView>(R.id.chip_recommendation_1),
+        val first = view.findViewById<TextView>(R.id.chip_recommendation_1)
+        val chipViews = mutableListOf(
+            first,
             view.findViewById<TextView>(R.id.chip_recommendation_2),
             view.findViewById<TextView>(R.id.chip_recommendation_3),
         )
+        // More than 3 actions (e.g. 5 alternative voices): add extra chips styled like chip 1
+        val container = first?.parent as? ViewGroup
+        container?.let { c ->
+            for (i in (c.childCount - 1) downTo 0) {
+                if (c.getChildAt(i).tag == EXTRA_CHIP_TAG) c.removeViewAt(i)
+            }
+        }
+        if (first != null && container != null) {
+            for (i in chipViews.size until chips.size) {
+                val extra = TextView(this).apply {
+                    tag = EXTRA_CHIP_TAG
+                    layoutParams = first.layoutParams
+                    minHeight = first.minHeight
+                    gravity = first.gravity
+                    setPadding(first.paddingLeft, first.paddingTop, first.paddingRight, first.paddingBottom)
+                    setTextColor(first.currentTextColor)
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, first.textSize)
+                    setBackgroundResource(R.drawable.language_pill_bg)
+                    isClickable = true
+                }
+                container.addView(extra, container.indexOfChild(chipViews.last()) + 1)
+                chipViews.add(extra)
+            }
+        }
         chipViews.forEach { it?.visibility = View.GONE }
         for (i in 0 until minOf(chips.size, chipViews.size)) {
             val chipView = chipViews[i] ?: continue
@@ -463,8 +626,9 @@ class OverlayService : Service() {
 
             val existingView = recommendationView
             if (existingView != null) {
-                // Update in place to prevent flicker
+                // Update in place to prevent flicker — its height changes with the content, so re-place it
                 bindCard(existingView, title, subtitle, chips)
+                recommendationParams?.let { positionCard(existingView, it, update = true) }
                 return@post
             }
 
@@ -476,7 +640,6 @@ class OverlayService : Service() {
 
             val density = resources.displayMetrics.density
             val screenW = resources.displayMetrics.widthPixels
-            val screenH = resources.displayMetrics.heightPixels
             val cardWidth = (290 * density).toInt()
 
             val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
@@ -492,8 +655,6 @@ class OverlayService : Service() {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
-                val currentY = overlayParams?.y ?: (screenH / 2)
-                y = (currentY - (175 * density).toInt()).coerceIn((40 * density).toInt(), screenH - (250 * density).toInt())
                 x = if (currentEdge == Edge.RIGHT) {
                     (screenW - cardWidth - (12 * density).toInt()).coerceAtLeast(0)
                 } else {
@@ -501,6 +662,7 @@ class OverlayService : Service() {
                 }
             }
 
+            positionCard(view, p, update = false)
             recommendationView = view
             recommendationParams = p
 
@@ -512,6 +674,45 @@ class OverlayService : Service() {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to show recommendation view: ${e.message}")
             }
+        }
+    }
+
+    /**
+     * Places the card next to the bubble/toolbar using its MEASURED height:
+     * above it when there's room, else below it, else on whichever side has more
+     * space. A fixed offset used to let tall cards cover the toolbar.
+     */
+    private fun positionCard(view: View, p: WindowManager.LayoutParams, update: Boolean) {
+        val density = resources.displayMetrics.density
+        val screenH = resources.displayMetrics.heightPixels
+        val gap = (8 * density).toInt()
+        val topLimit = (32 * density).toInt()
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec((290 * density).toInt(), View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        val cardH = view.measuredHeight
+
+        val anchor = overlayRootView
+        val (anchorTop, anchorBottom) = if (anchor != null && anchor.height > 0) {
+            val loc = IntArray(2)
+            anchor.getLocationOnScreen(loc)
+            loc[1] to loc[1] + anchor.height
+        } else {
+            val y = overlayParams?.y ?: (screenH / 2)
+            y to y + (52 * density).toInt()
+        }
+
+        val above = anchorTop - gap - cardH
+        val below = anchorBottom + gap
+        p.y = when {
+            above >= topLimit -> above
+            below + cardH <= screenH - gap -> below
+            anchorTop - topLimit >= screenH - anchorBottom -> topLimit
+            else -> (screenH - cardH - gap).coerceAtLeast(topLimit)
+        }
+        if (update) {
+            try { windowManager?.updateViewLayout(view, p) } catch (e: Exception) {}
         }
     }
 
@@ -545,7 +746,7 @@ class OverlayService : Service() {
         val root = overlayRootView ?: return
         val toolbar = root.findViewById<LinearLayout>(R.id.toolbar_container) ?: return
         val collapseBtn = root.findViewById<FrameLayout>(R.id.btn_collapse_handle) ?: return
-        val collapseArrow = root.findViewById<TextView>(R.id.collapse_arrow) ?: return
+        val collapseArrow = root.findViewById<ImageView>(R.id.collapse_arrow) ?: return
         val divider = root.findViewById<View>(R.id.toolbar_divider) ?: return
         val actionButtons = root.findViewById<LinearLayout>(R.id.action_buttons_container) ?: return
         val density = resources.displayMetrics.density
@@ -560,8 +761,8 @@ class OverlayService : Service() {
             toolbar.addView(divider)
             toolbar.addView(collapseBtn)
 
-            collapseArrow.text = "‹"
-            collapseBtn.setBackgroundResource(R.drawable.btn_collapse_bg_right)
+            collapseArrow.setImageResource(R.drawable.ic_chevron_left)
+            collapseBtn.setBackgroundResource(R.drawable.btn_bg_toolbar)
             collapseBtn.setPadding(0, 0, 0, 0)
             (collapseBtn.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
                 lp.marginStart = (2 * density).toInt()
@@ -571,7 +772,7 @@ class OverlayService : Service() {
 
             // Fully visible 24dp rounded left corners (no negative margins or offscreen shifts)
             toolbar.setBackgroundResource(R.drawable.overlay_bg)
-            toolbar.setPadding((6 * density).toInt(), 0, (4 * density).toInt(), 0)
+            toolbar.setPadding((6 * density).toInt(), 0, (6 * density).toInt(), 0)
 
             (toolbar.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
                 lp.gravity = Gravity.BOTTOM or Gravity.START
@@ -585,8 +786,8 @@ class OverlayService : Service() {
             toolbar.addView(divider)
             toolbar.addView(actionButtons)
 
-            collapseArrow.text = "›"
-            collapseBtn.setBackgroundResource(R.drawable.btn_collapse_bg_left)
+            collapseArrow.setImageResource(R.drawable.ic_chevron_right)
+            collapseBtn.setBackgroundResource(R.drawable.btn_bg_toolbar)
             collapseBtn.setPadding(0, 0, 0, 0)
             (collapseBtn.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
                 lp.marginStart = 0
@@ -596,7 +797,7 @@ class OverlayService : Service() {
 
             // Fully visible 24dp rounded corners, anchored directly to right bounds
             toolbar.setBackgroundResource(R.drawable.overlay_bg)
-            toolbar.setPadding((4 * density).toInt(), 0, (6 * density).toInt(), 0)
+            toolbar.setPadding((6 * density).toInt(), 0, (6 * density).toInt(), 0)
 
             (toolbar.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
                 lp.gravity = Gravity.BOTTOM or Gravity.END
@@ -662,9 +863,7 @@ class OverlayService : Service() {
 
         val disk = view.findViewById<View>(R.id.disk_container)
         val toolbar = view.findViewById<View>(R.id.toolbar_container)
-        val langMenu = view.findViewById<View>(R.id.language_popup_wrapper)
-
-        langMenu?.visibility = View.GONE
+        glideMenu.dismissNow()
         toolbar?.visibility = View.GONE
         disk?.visibility = View.VISIBLE
         disk?.alpha = 0f
@@ -688,10 +887,14 @@ class OverlayService : Service() {
         val newEdge = if (releaseRawX < screenW / 2f) Edge.LEFT else Edge.RIGHT
         currentEdge = newEdge
 
-        // Persist edge choice
+        // Persist edge + the height the user dropped it at
+        val screenH = resources.displayMetrics.heightPixels
+        savedYFrac = (params.y.toFloat() / screenH).coerceIn(0f, 1f)
+        lastTargetY = params.y
         getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
             .edit()
             .putString("overlay_edge", if (newEdge == Edge.LEFT) "left" else "right")
+            .putFloat("overlay_y_frac", savedYFrac)
             .apply()
 
         applyEdgeLayout(newEdge)
@@ -713,6 +916,7 @@ class OverlayService : Service() {
         }
         animator.addListener(object : android.animation.AnimatorListenerAdapter() {
             override fun onAnimationEnd(animation: android.animation.Animator) {
+                isUserMoving = false
                 // Lock flush to the physical bezel
                 if (newEdge == Edge.RIGHT) {
                     params.gravity = Gravity.TOP or Gravity.END
@@ -756,6 +960,7 @@ class OverlayService : Service() {
                     if (Math.hypot(dx.toDouble(), dy.toDouble()) > 15.0) {
                         if (!isDrag) {
                             isDrag = true
+                            isUserMoving = true
                             v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(40).start()
                         }
                         if (p != null) {
@@ -810,6 +1015,16 @@ class OverlayService : Service() {
 
         langBadge?.text = activeLanguageBadge
 
+        // ── 0. Any touch outside the overlay (chat, keyboard, other windows) closes the toolbar ──
+        view.setOnTouchListener { _, ev ->
+            if (ev.actionMasked == MotionEvent.ACTION_OUTSIDE) {
+                maybeAutoCollapse()
+                true
+            } else {
+                false
+            }
+        }
+
         // ── 1. Full Draggability for the Disk (with Drop Zone & Drag-to-Disable) ──
         var diskDownX = 0f
         var diskDownY = 0f
@@ -831,6 +1046,7 @@ class OverlayService : Service() {
 
                     isDiskDrag = false
                     isHoveringDropZone = false
+                    diskContainer.animate().scaleX(0.92f).scaleY(0.92f).setDuration(70).start()
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -840,6 +1056,7 @@ class OverlayService : Service() {
                     if (Math.hypot(dx.toDouble(), dy.toDouble()) > 8.0) {
                         if (!isDiskDrag) {
                             isDiskDrag = true
+                            isUserMoving = true
                             showDropZone()
                         }
 
@@ -875,6 +1092,7 @@ class OverlayService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
+                    diskContainer.animate().scaleX(1f).scaleY(1f).setDuration(90).start()
                     if (isDiskDrag) {
                         val shouldDisable = isHoveringDropZone
                         hideDropZone()
@@ -890,6 +1108,7 @@ class OverlayService : Service() {
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> {
+                    diskContainer.animate().scaleX(1f).scaleY(1f).setDuration(90).start()
                     hideDropZone()
                     if (isDiskDrag) {
                         snapToNearestEdge(ev.rawX)
@@ -904,10 +1123,6 @@ class OverlayService : Service() {
         bindQuickActionButton(view.findViewById<View>(R.id.btn_improve)) {
             val draft = ChatAccessibilityService.instance?.readInputFieldText()
             IndicContextModule.instance?.emitActionTriggered("improve", draft)
-        }
-        bindQuickActionButton(view.findViewById<View>(R.id.btn_factcheck)) {
-            val draft = ChatAccessibilityService.instance?.readInputFieldText()
-            IndicContextModule.instance?.emitActionTriggered("factcheck", draft)
         }
         bindQuickActionButton(view.findViewById<View>(R.id.btn_smart_replies)) {
             val draft = ChatAccessibilityService.instance?.readInputFieldText()
@@ -941,6 +1156,7 @@ class OverlayService : Service() {
                     val dy = ev.rawY - tbDownY
                     if (Math.hypot(dx.toDouble(), dy.toDouble()) > 10.0) {
                         isTbDrag = true
+                        isUserMoving = true
                         val p = overlayParams ?: return@setOnTouchListener false
                         val screenW = resources.displayMetrics.widthPixels
                         val screenH = resources.displayMetrics.heightPixels
@@ -973,186 +1189,137 @@ class OverlayService : Service() {
         }
 
         // ── 5. Touch & Glide Language Selector with Caret ──
-        setupGlideLanguageSelector(view)
+        setupGlideButtons(view)
 
         return view
     }
 
     /**
-     * Component 3: Glide-Select Language Menu on Mic button
-     * - Absolute Y positioning to avoid displacing toolbar.
-     * - Downward pointing Caret triangle aligned to Mic button.
+     * Hold-and-glide pickers. Long-press opens a [GlideMenu] in its own overlay
+     * window above the button; gliding highlights a row; releasing picks it.
+     * A short tap runs the button's normal action.
+     *  - 🎙️ mic: speech language (tap = dictation)
+     *  - 🗣️ voice changer: Timbre voice (tap = record / stop)
      */
-    private fun setupGlideLanguageSelector(rootView: View) {
-        val btnMic = rootView.findViewById<View>(R.id.btn_mic) ?: return
-        val popupWrapper = rootView.findViewById<LinearLayout>(R.id.language_popup_wrapper)
+    private fun setupGlideButtons(rootView: View) {
+        val btnMic = rootView.findViewById<View>(R.id.btn_mic)
         val langBadge = rootView.findViewById<TextView>(R.id.txt_lang_badge)
+        langBadge?.text = activeLanguageBadge
 
-        val langPills = listOf(
-            rootView.findViewById<TextView>(R.id.lang_item_en),
-            rootView.findViewById<TextView>(R.id.lang_item_hi),
-            rootView.findViewById<TextView>(R.id.lang_item_mr),
-            rootView.findViewById<TextView>(R.id.lang_item_bn),
-            rootView.findViewById<TextView>(R.id.lang_item_te),
-            rootView.findViewById<TextView>(R.id.lang_item_ta),
-            rootView.findViewById<TextView>(R.id.lang_item_ml),
+        bindGlideButton(
+            btnMic,
+            onTap = { toggleVoiceRecording() },
+            canOpen = { !isVoiceRecording() && !isTranscribing },
+            open = { anchor ->
+                glideMenu.show(
+                    anchor, "HOLD & GLIDE · SPEECH LANGUAGE",
+                    GLIDE_LANGUAGES.map { GlideMenu.Item(it.code, it.name, listOfNotNull(it.native, it.badge).joinToString(" · ")) },
+                    activeLanguageCode,
+                )
+            },
+            onPick = { item ->
+                val lang = GLIDE_LANGUAGES.firstOrNull { it.code == item.key } ?: return@bindGlideButton
+                applyLanguage(lang.code)
+                Toast.makeText(applicationContext, "🎙️ Language: ${lang.name}", Toast.LENGTH_SHORT).show()
+            },
         )
 
-        var isLongPressActive = false
-        var longPressRunnable: Runnable? = null
-        var currentlyHoveredPill: TextView? = null
-        var originalOverlayY = 0
+        val btnTranslate = rootView.findViewById<View>(R.id.btn_translate)
+        val translateBadge = rootView.findViewById<TextView>(R.id.txt_translate_badge)
+        translateBadge?.text = translateTarget().badge
+        bindGlideButton(
+            btnTranslate,
+            onTap = {
+                if (translatePulse != null) {
+                    Toast.makeText(applicationContext, "Still translating…", Toast.LENGTH_SHORT).show()
+                } else {
+                    setTranslateBusy(true)
+                    val draft = ChatAccessibilityService.instance?.readInputFieldText()
+                    IndicContextModule.instance?.emitActionTriggered("translate", draft)
+                }
+            },
+            canOpen = { translatePulse == null },
+            open = { anchor ->
+                glideMenu.show(
+                    anchor, "HOLD & GLIDE · TRANSLATE TO",
+                    TRANSLATE_TARGETS.map { GlideMenu.Item(it.code, it.name, listOfNotNull(it.native, it.badge).joinToString(" · ")) },
+                    translateTarget().code,
+                )
+            },
+            onPick = { item ->
+                val t = TRANSLATE_TARGETS.firstOrNull { it.code == item.key } ?: return@bindGlideButton
+                getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+                    .edit().putString("translate_target", t.code).apply()
+                translateBadge?.text = t.badge
+                Toast.makeText(applicationContext, "🌐 Translate to ${t.name}", Toast.LENGTH_SHORT).show()
+            },
+        )
 
-        btnMic.setOnTouchListener { v, ev ->
-            when (ev.action) {
+        val btnVoice = rootView.findViewById<View>(R.id.btn_voice_changer)
+        bindGlideButton(
+            btnVoice,
+            onTap = { voiceChanger.onButtonTap() },
+            canOpen = { voiceChanger.canPickVoice() },
+            open = { anchor ->
+                glideMenu.show(anchor, "HOLD & GLIDE · VOICE", voiceChanger.glideItems(), voiceChanger.selectedVoice().id)
+            },
+            onPick = { item -> voiceChanger.selectVoice(item.key) },
+        )
+        updateVoiceChangerUi(voiceChanger.initialButtonState())
+    }
+
+    private fun bindGlideButton(
+        button: View?,
+        onTap: () -> Unit,
+        canOpen: () -> Boolean,
+        open: (View) -> Unit,
+        onPick: (GlideMenu.Item) -> Unit,
+    ) {
+        if (button == null) return
+        var menuOpen = false
+        var longPress: Runnable? = null
+
+        button.setOnTouchListener { v, ev ->
+            when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    isLongPressActive = false
-                    currentlyHoveredPill = null
-
-                    val r = Runnable {
-                        isLongPressActive = true
-                        v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-
-                        val density = resources.displayMetrics.density
-                        popupWrapper?.bringToFront()
-                        popupWrapper?.elevation = 32 * density
-
-                        // Position Caret & Menu directly over Mic icon
-                        val micLoc = IntArray(2)
-                        btnMic.getLocationOnScreen(micLoc)
-                        val menuWidth = (200 * density).toInt()
-
-                        // Calculate horizontal alignment so caret is centered above Mic
-                        val micCenterX = micLoc[0] + (btnMic.width / 2)
-                        val screenW = resources.displayMetrics.widthPixels
-                        val menuX = (micCenterX - (menuWidth / 2)).coerceIn(
-                            (8 * density).toInt(),
-                            screenW - menuWidth - (8 * density).toInt()
-                        )
-
-                        val rootLoc = IntArray(2)
-                        rootView.getLocationOnScreen(rootLoc)
-                        popupWrapper?.x = (menuX - rootLoc[0]).toFloat()
-
-                        val caret = rootView.findViewById<View>(R.id.menu_caret)
-                        val caretW = (14 * density).toInt()
-                        val caretXInPopup = (micCenterX - menuX - (caretW / 2f)).coerceIn(
-                            (12 * density),
-                            (menuWidth - (12 * density) - caretW).toFloat()
-                        )
-                        caret?.translationX = caretXInPopup
-
-                        // Compensate WindowManager Y so toolbar DOES NOT SHIFT DOWN
-                        val wm = windowManager
-                        val p = overlayParams
-                        if (wm != null && p != null) {
-                            originalOverlayY = p.y
-                            popupWrapper?.measure(
-                                View.MeasureSpec.makeMeasureSpec(menuWidth, View.MeasureSpec.EXACTLY),
-                                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-                            )
-                            val popupH = (popupWrapper?.measuredHeight ?: (220 * density).toInt()) + (8 * density).toInt()
-
-                            // Shift window up by popup height + gap so toolbar stays rigidly fixed!
-                            p.y = (p.y - popupH).coerceAtLeast(0)
-                            try { wm.updateViewLayout(rootView, p) } catch (e: Exception) {}
+                    menuOpen = false
+                    v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    v.animate().scaleX(0.9f).scaleY(0.9f).setDuration(50).start()
+                    if (canOpen()) {
+                        val r = Runnable {
+                            menuOpen = true
+                            v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            v.animate().scaleX(1f).scaleY(1f).setDuration(60).start()
+                            open(v)
                         }
-
-                        popupWrapper?.visibility = View.VISIBLE
-                        popupWrapper?.alpha = 0f
-                        popupWrapper?.scaleY = 0.8f
-                        popupWrapper?.pivotY = (popupWrapper?.measuredHeight?.toFloat() ?: (220 * density))
-                        popupWrapper?.animate()?.alpha(1f)?.scaleY(1f)?.setDuration(160)?.start()
+                        longPress = r
+                        mainHandler.postDelayed(r, 320L)
                     }
-                    longPressRunnable = r
-                    mainHandler.postDelayed(r, 300L)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    if (isLongPressActive) {
-                        val rawX = ev.rawX
-                        val rawY = ev.rawY
-
-                        var hovered: TextView? = null
-                        val loc = IntArray(2)
-
-                        for (pill in langPills) {
-                            if (pill == null) continue
-                            pill.getLocationOnScreen(loc)
-                            val left = loc[0]
-                            val top = loc[1]
-                            val right = left + pill.width
-                            val bottom = top + pill.height
-
-                            if (rawX in (left.toFloat() - 35)..(right.toFloat() + 35) &&
-                                rawY in (top.toFloat() - 4)..(bottom.toFloat() + 4)) {
-                                hovered = pill
-                                break
-                            }
-                        }
-
-                        if (hovered != currentlyHoveredPill) {
-                            currentlyHoveredPill = hovered
-                            for (pill in langPills) {
-                                if (pill == null) continue
-                                if (pill == hovered) {
-                                    pill.setBackgroundResource(R.drawable.language_pill_selected_bg)
-                                    pill.animate().scaleX(1.06f).scaleY(1.06f).setDuration(80).start()
-                                    pill.setTypeface(null, Typeface.BOLD)
-                                    pill.setTextColor(Color.parseColor("#00E5FF"))
-                                } else {
-                                    pill.setBackgroundResource(R.drawable.language_pill_bg)
-                                    pill.animate().scaleX(1.0f).scaleY(1.0f).setDuration(80).start()
-                                    pill.setTypeface(null, Typeface.NORMAL)
-                                    pill.setTextColor(Color.parseColor("#FAFAFA"))
-                                }
-                            }
-                        }
+                    if (menuOpen) glideMenu.hover(ev.rawX, ev.rawY)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    longPress?.let { mainHandler.removeCallbacks(it) }
+                    longPress = null
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(60).start()
+                    if (menuOpen) {
+                        menuOpen = false
+                        glideMenu.dismiss()?.let(onPick)
+                    } else {
+                        onTap()
                     }
                     true
                 }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    longPressRunnable?.let { mainHandler.removeCallbacks(it) }
-                    longPressRunnable = null
-
-                    if (isLongPressActive) {
-                        currentlyHoveredPill?.let { selectedPill ->
-                            val tag = selectedPill.tag as? String // e.g. "mr-IN:MR"
-                            if (tag != null) {
-                                val parts = tag.split(":")
-                                val code = parts[0]
-                                val badge = parts[1]
-
-                                activeLanguageCode = code
-                                activeLanguageBadge = badge
-                                GnaniSttClient.currentLanguage = code
-                                langBadge?.text = badge
-
-                                getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
-                                    .edit()
-                                    .putString("gnani_language", code)
-                                    .apply()
-
-                                Toast.makeText(applicationContext, "🗣️ Selected: ${selectedPill.text}", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-
-                        // Restore original WindowManager Y to avoid drift
-                        popupWrapper?.animate()?.alpha(0f)?.setDuration(120)?.withEndAction {
-                            popupWrapper.visibility = View.GONE
-                            val wm = windowManager
-                            val p = overlayParams
-                            if (wm != null && p != null && originalOverlayY > 0) {
-                                p.y = originalOverlayY
-                                try { wm.updateViewLayout(rootView, p) } catch (e: Exception) {}
-                            }
-                        }?.start()
-
-                        isLongPressActive = false
-                        currentlyHoveredPill = null
-                    } else {
-                        // Quick Tap: Toggle voice recording!
-                        toggleVoiceRecording()
+                MotionEvent.ACTION_CANCEL -> {
+                    longPress?.let { mainHandler.removeCallbacks(it) }
+                    longPress = null
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(60).start()
+                    if (menuOpen) {
+                        menuOpen = false
+                        glideMenu.dismiss()
                     }
                     true
                 }
@@ -1222,6 +1389,10 @@ class OverlayService : Service() {
                     ).show()
                     return@post
                 }
+                if (::voiceChanger.isInitialized && voiceChanger.isRecording()) {
+                    Toast.makeText(applicationContext, "Stop the 🗣️ voice recording first.", Toast.LENGTH_SHORT).show()
+                    return@post
+                }
 
                 try {
                     voiceRecorder.start()
@@ -1242,23 +1413,94 @@ class OverlayService : Service() {
 
         overlayRootView?.let { root ->
             val micContainer = root.findViewById<View>(R.id.btn_mic)
-            val micIconText = root.findViewById<TextView>(R.id.mic_icon_text)
+            val micIcon = root.findViewById<ImageView>(R.id.mic_icon)
 
             when {
                 isRecording -> {
                     micContainer?.setBackgroundResource(R.drawable.btn_bg_mic_recording)
-                    micIconText?.text = "🔴"
+                    micIcon?.setImageResource(R.drawable.ic_stop)
                     micContainer?.alpha = 1.0f
                 }
                 isTranscribing -> {
-                    micContainer?.setBackgroundResource(R.drawable.btn_bg_glass)
-                    micIconText?.text = "..."
-                    micContainer?.alpha = 0.5f
+                    micContainer?.setBackgroundResource(R.drawable.btn_bg_processing)
+                    micIcon?.setImageResource(R.drawable.ic_hourglass)
+                    micContainer?.alpha = 0.8f
                 }
                 else -> {
-                    micContainer?.setBackgroundResource(R.drawable.btn_bg_glass)
-                    micIconText?.text = "🎙️"
+                    micContainer?.setBackgroundResource(R.drawable.btn_bg_toolbar)
+                    micIcon?.setImageResource(R.drawable.ic_mic)
                     micContainer?.alpha = 1.0f
+                }
+            }
+        }
+    }
+
+    /** Idle: 🗣️ + voice badge · Recording: red pill with pulsing dot + m:ss · Processing: pulsing violet. */
+    private fun updateVoiceChangerUi(state: VoiceChangerController.ButtonState) {
+        mainHandler.post {
+            val root = overlayRootView ?: return@post
+            val btn = root.findViewById<View>(R.id.btn_voice_changer) ?: return@post
+            val icon = root.findViewById<ImageView>(R.id.voice_changer_icon)
+            val badge = root.findViewById<TextView>(R.id.txt_voice_badge)
+            val recState = root.findViewById<View>(R.id.voice_rec_state)
+            val dot = root.findViewById<View>(R.id.voice_rec_dot)
+            val timer = root.findViewById<TextView>(R.id.voice_rec_timer)
+            val density = resources.displayMetrics.density
+
+            fun setWidth(dp: Int) {
+                val lp = btn.layoutParams
+                val px = (dp * density).toInt()
+                if (lp.width != px) { lp.width = px; btn.layoutParams = lp }
+            }
+
+            when (state) {
+                is VoiceChangerController.ButtonState.Recording -> {
+                    processingPulse?.cancel(); processingPulse = null; btn.alpha = 1f
+                    setWidth(80)
+                    btn.setBackgroundResource(R.drawable.btn_bg_rec_pill)
+                    icon?.visibility = View.GONE
+                    badge?.visibility = View.GONE
+                    recState?.visibility = View.VISIBLE
+                    val secs = state.elapsedMs / 1000
+                    timer?.text = String.format(java.util.Locale.US, "%d:%02d", secs / 60, secs % 60)
+                    if (recPulse == null && dot != null) {
+                        recPulse = android.animation.ObjectAnimator.ofFloat(dot, View.ALPHA, 1f, 0.25f).apply {
+                            duration = 550
+                            repeatMode = android.animation.ValueAnimator.REVERSE
+                            repeatCount = android.animation.ValueAnimator.INFINITE
+                            start()
+                        }
+                    }
+                }
+                is VoiceChangerController.ButtonState.Processing -> {
+                    recPulse?.cancel(); recPulse = null
+                    setWidth(40)
+                    btn.setBackgroundResource(R.drawable.btn_bg_processing)
+                    recState?.visibility = View.GONE
+                    icon?.visibility = View.VISIBLE
+                    icon?.setImageResource(R.drawable.ic_hourglass)
+                    badge?.visibility = View.VISIBLE
+                    if (processingPulse == null) {
+                        processingPulse = android.animation.ObjectAnimator.ofFloat(btn, View.ALPHA, 1f, 0.45f).apply {
+                            duration = 650
+                            repeatMode = android.animation.ValueAnimator.REVERSE
+                            repeatCount = android.animation.ValueAnimator.INFINITE
+                            start()
+                        }
+                    }
+                }
+                is VoiceChangerController.ButtonState.Idle -> {
+                    recPulse?.cancel(); recPulse = null
+                    processingPulse?.cancel(); processingPulse = null
+                    btn.alpha = 1f
+                    dot?.alpha = 1f
+                    setWidth(40)
+                    btn.setBackgroundResource(R.drawable.btn_bg_toolbar)
+                    recState?.visibility = View.GONE
+                    icon?.visibility = View.VISIBLE
+                    icon?.setImageResource(R.drawable.ic_voice_changer)
+                    badge?.visibility = View.VISIBLE
+                    badge?.text = state.voiceBadge
                 }
             }
         }
@@ -1289,7 +1531,8 @@ class OverlayService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {
             if (currentEdge == Edge.RIGHT) {
@@ -1327,7 +1570,7 @@ class OverlayService : Service() {
         return builder
             .setContentTitle("IndicContext Copilot")
             .setContentText("Active in WhatsApp.")
-            .setSmallIcon(android.R.drawable.ic_menu_edit)
+            .setSmallIcon(R.drawable.ic_notification)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPi)
             .setOngoing(true)
             .build()

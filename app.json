@@ -7,7 +7,9 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "backgroundColor": "#0F172A"
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B1020"
     },
     "ios": {
       "supportsTablet": false
@@ -15,7 +17,9 @@
     "android": {
       "package": "com.indiccontext.assistant",
       "adaptiveIcon": {
-        "backgroundColor": "#0F172A"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundImage": "./assets/adaptive-icon-bg.png",
+        "backgroundColor": "#4F46E5"
       },
       "permissions": [
         "android.permission.RECORD_AUDIO",
@@ -40,6 +44,7 @@
       "eas": {
         "projectId": "9c948f23-3dee-4361-8949-61b234dce7b7"
       }
-    }
+    },
+    "icon": "./assets/icon.png"
   }
 }
