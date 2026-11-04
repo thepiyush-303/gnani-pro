@@ -5,9 +5,13 @@
   "scripts": {
     "start": "expo start --dev-client --tunnel",
     "android": "expo run:android",
+    "start:usb": "\"${ANDROID_HOME:-$HOME/Android/Sdk}/platform-tools/adb\" reverse tcp:8081 tcp:8081 && expo start --dev-client --localhost",
+    "android:usb": "\"${ANDROID_HOME:-$HOME/Android/Sdk}/platform-tools/adb\" reverse tcp:8081 tcp:8081 && \"${ANDROID_HOME:-$HOME/Android/Sdk}/platform-tools/adb\" shell am start -a android.intent.action.VIEW -d 'indiccontext://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081'",
     "prebuild": "expo prebuild --clean",
     "build:apk": "cd android && ./gradlew assembleDebug",
     "build:apk:release": "cd android && ./gradlew assembleRelease",
+    "build:apk:dev": "cd android && ./gradlew assembleDebug",
+    "build:apk:share": "cd android && ./gradlew assembleRelease",
     "ios": "expo run:ios",
     "eval:prompts": "npx -y tsx --env-file=.env scripts/evalPrompts.ts"
   },

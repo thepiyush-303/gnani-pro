@@ -4,20 +4,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-- **Start Expo dev server**: `npm start` (or `expo start`)
-  - Runs the Metro bundler and provides a QR code for Expo Go or dev client.
-- **Run on Android**: `npm run android` (or `expo run:android`)
-  - Compiles and launches the app on a connected Android device/emulator.
-- **Build debug APK**: `npm run build:apk`
-  - Generates `android/app/build/outputs/apk/debug/app-debug.apk`.
-- **Build release APK**: `npm run build:apk:release`
-  - Generates signed release APK (requires keystore configuration).
-- **Run on iOS**: `npm run ios` (or `expo run:ios`)
-  - Requires macOS and Xcode; launches iOS simulator or device.
-- **Prebuild native code**: `npm run prebuild`
-  - Generates Android/iOS native directories (use before building or when modifying native dependencies).
-- **Type checking**: `npx tsc --noEmit`
-  - Validates TypeScript code without emitting files (since Expo uses Babel for JS output).
+There are two kinds of Android build. Don't mix them up:
+
+| | Dev build (`assembleDebug`) | Shareable build (`assembleRelease`) |
+|---|---|---|
+| JavaScript | **Not included.** Loaded live from Metro on your computer | **Bundled inside the APK** |
+| Runs without your computer? | No ("There was a problem loading the project" if Metro is unreachable) | Yes |
+| Use for | Day-to-day development (fast reload) | Giving the app to others / demos |
+| Output | `android/app/build/outputs/apk/debug/app-debug.apk` | `android/app/build/outputs/apk/release/app-release.apk` |
+
+- **Develop over USB (works on any network, including mobile data):**
+  1. `npm run start:usb`: sets up `adb reverse tcp:8081` and starts Metro on `localhost`.
+  2. `npm run android:usb` (second terminal): opens the installed dev build pointed at `http://localhost:8081`.
+
+  Wi-Fi alternative: `npm start` (tunnel) or `npx expo start --dev-client` with the phone on the **same** Wi-Fi as the computer.
+- **Build + install the dev build:** `npm run android` (`expo run:android`), or `npm run build:apk:dev` (alias `build:apk`).
+- **Build a shareable APK:** `npm run build:apk:share` (alias `build:apk:release`). It's signed with the debug keystore (`android/app/build.gradle` → `release { signingConfig signingConfigs.debug }`), which is fine for testers and hackathon demos. For the Play Store, create a real keystore.
+  - Install: `adb install -r android/app/build/outputs/apk/release/app-release.apk`, or send the file. Testers enable "Install unknown apps", and on Android 13+ use App info → ⋮ → *Allow restricted settings* before turning on Accessibility.
+  - ⚠️ `.env` `EXPO_PUBLIC_*` values (Gemini/Gnani keys) are compiled into the APK and can be extracted. Rotate or limit keys before sharing widely.
+- **Run on iOS**: `npm run ios` (macOS + Xcode; the overlay features are Android-only).
+- **Prebuild native code**: `npx expo prebuild --platform android --no-install` applies `app.json` changes (icons, plugins) to `android/` in place. `npm run prebuild` (`--clean`) regenerates it from scratch.
+- **Type checking**: `npx tsc --noEmit`. Native unit tests: `cd android && ./gradlew :indic-context:testDebugUnitTest`.
+- **Prompt eval** (live LLM calls): `npm run eval:prompts`.
 
 ## Project Structure & Architecture
 
