@@ -304,6 +304,18 @@ export async function setVoice(id: string): Promise<string> {
 }
 
 /**
+ * Plays a short sample of the voice in the current speech language. Resolves when
+ * playback starts; the first preview of each voice makes one Timbre TTS call, then it's cached.
+ */
+export async function previewVoice(id: string): Promise<string> {
+  return NativeModule.previewVoice(id);
+}
+
+export async function stopVoicePreview(): Promise<void> {
+  return NativeModule.stopVoicePreview();
+}
+
+/**
  * Starts audio recording for voice-to-text.
  * Can be called from the dashboard or overlay.
  */
@@ -425,6 +437,8 @@ const IndicContext = {
   getVoices,
   getVoice,
   setVoice,
+  previewVoice,
+  stopVoicePreview,
   startVoiceRecording,
   stopVoiceRecording,
   isVoiceRecording,

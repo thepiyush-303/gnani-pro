@@ -129,3 +129,32 @@ Source of truth: `DESIGN.md` (Rose · JetBrains Mono · Bento · radius 4/8/12 �
 - Package ID unchanged (`com.indiccontext.assistant`), so updates install in place and permissions survive.
 - Icon: `assets/new-icon.png` → `icon` + splash (bg `#DC1E42`). The adaptive foreground (`assets/adaptive-icon.png`) is the icon at 80% so circular masks don't clip the mascot (`scripts/generateIcons.py`).
 
+---
+
+## Round 4 (2026-11-08): interactive, animated tutorial + choose a voice at start
+**Tutorial (`app/onboarding.tsx`), 7 steps:**
+1. Welcome: the mascot pops in, then feature tiles stagger in.
+2. **Try it:** `src/ui/tutorial/ToolbarDemo.tsx`, a practice chat with a pulsing ConvoAI bubble.
+   - Tap the bubble and the toolbar slides out.
+   - Each button shows what it does:
+     - ✨ suggestion card (tap to insert);
+     - 🌐 draft becomes Hindi;
+     - 🗣 rose recording pill with a ticking timer, then the "Ready in Lakshmi's voice" card;
+     - 💬 three replies;
+     - 🎙 "Listening…", then the words type in.
+   - Tapping the chat closes the toolbar (teaches auto-close). A "Tried X of 5" tracker, ↺ Replay, and a celebration when all 5 are tried.
+   - Fully local: no LLM or network.
+3. **Choose your voice:** the 6 Timbre voices with ▶ samples; the choice is saved as the default `tts_voice`.
+4–6. Permissions: the icon pulses until granted, then a ✓ pops in. Step numbers turn into checks, and steps stagger in.
+7. All set: mascot pop + staggered recap.
+- Step changes fade and slide (`FadeIn` keyed by step). `src/ui/motion.tsx` (`FadeIn`, `Pulse`, `Pop`, `useReducedMotion`) uses Animated with the native driver and shows content statically when "Remove animations" is on.
+
+**Voice samples:** `VoicePreviewPlayer.kt` + bridge `previewVoice(id)` / `stopVoicePreview()`.
+- Synthesises "Hi! I'm {voice}…" (or the Hindi equivalent when the speech language is Hindi) with Timbre v3.0 and plays it.
+- Cached in `cache/voice_previews/{voice}_{lang}.ogg`, so each costs one TTS call ever.
+- `src/ui/VoicePicker.tsx` (select + ▶/■ with a loading spinner) is shared by the tutorial and Home's voice tile.
+
+### Checks
+- [x] `tsc`; `compileDebugKotlin` + unit tests; release APK builds (bundle contains the demo and voice step)
+- [ ] On device: tutorial animations; demo buttons; ▶ samples play (needs network on first play); reduced-motion setting turns animations off
+
