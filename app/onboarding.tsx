@@ -1,31 +1,37 @@
 /**
- * Tutorial — shown on first launch and from Home ("How to use" / help icon).
- * 1 Welcome · 2 Display over apps · 3 Accessibility · 4 Microphone · 5 Using the bubble
+ * Tutorial: interactive and animated. Shown on first launch and from Home.
+ *   1 Welcome · 2 Try it (interactive toolbar demo) · 3 Choose your voice ·
+ *   4–6 Permissions (live status, animated) · 7 All set
+ * Animations respect the system "Remove animations" setting (src/ui/motion.tsx).
  */
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import IndicContext, { type TimbreVoice } from 'indic-context';
 
 import { useCopilot } from '../src/hooks/CopilotBridge';
 import { usePermissions, type PermissionStatus } from '../src/hooks/usePermissions';
 import { setOnboarded } from '../src/services/onboardingStore';
 import { font, radius, space, useTheme } from '../src/ui/theme';
 import { AppMark, Card, IconBadge, type IconName, PrimaryButton, StepDots, Tile } from '../src/ui/components';
+import { FadeIn, Pop, Pulse } from '../src/ui/motion';
+import { VoicePicker } from '../src/ui/VoicePicker';
+import { ToolbarDemo } from '../src/ui/tutorial/ToolbarDemo';
 
-type Step =
-  | { kind: 'welcome' }
-  | { kind: 'permission'; perm: 'overlay' | 'accessibility' | 'microphone' }
-  | { kind: 'usage' };
+type Perm = 'overlay' | 'accessibility' | 'microphone';
+type Step = { kind: 'welcome' } | { kind: 'try' } | { kind: 'voice' } | { kind: 'permission'; perm: Perm } | { kind: 'done' };
 
 const STEPS: Step[] = [
   { kind: 'welcome' },
+  { kind: 'try' },
+  { kind: 'voice' },
   { kind: 'permission', perm: 'overlay' },
   { kind: 'permission', perm: 'accessibility' },
   { kind: 'permission', perm: 'microphone' },
-  { kind: 'usage' },
+  { kind: 'done' },
 ];
 
 const FEATURES: { icon: IconName; title: string; body: string }[] = [
@@ -35,10 +41,7 @@ const FEATURES: { icon: IconName; title: string; body: string }[] = [
   { icon: 'account-voice', title: 'Voice notes in another voice', body: 'Your words, spoken by one of 6 natural voices, sent to the chat.' },
 ];
 
-const PERMISSION_COPY: Record<
-  'overlay' | 'accessibility' | 'microphone',
-  { icon: IconName; title: string; why: string; steps: string[]; button: string }
-> = {
+const PERMISSION_COPY: Record<Perm, { icon: IconName; title: string; why: string; steps: string[]; button: string }> = {
   overlay: {
     icon: 'layers-outline',
     title: 'Display over other apps',
@@ -66,14 +69,13 @@ const PERMISSION_COPY: Record<
   },
 };
 
-const USAGE: { icon: IconName; text: string }[] = [
-  { icon: 'whatsapp', text: 'Open any WhatsApp chat. The bubble appears just above the message box (only inside chats).' },
-  { icon: 'gesture-tap-button', text: 'Tap the bubble to open the toolbar. Touching anything else closes it again.' },
-  { icon: 'creation', text: 'Type a draft and tap ✨ to improve it, or tap 💬 for smart replies. Tap a suggestion to insert it.' },
-  { icon: 'translate', text: '🌐 Tap to translate your draft to English or Hindi (it replaces the text). Hold and glide to choose the language.' },
-  { icon: 'microphone-outline', text: '🎙 Tap to dictate. Hold and glide your finger to change the language.' },
-  { icon: 'account-voice', text: '🗣 Tap to record, tap again to stop. Hold and glide to pick a voice, then Send.' },
-  { icon: 'gesture-swipe-down', text: 'Drag the bubble to the bottom of the screen to turn the assistant off.' },
+const RECAP: { icon: IconName; text: string }[] = [
+  { icon: 'whatsapp', text: 'Open any WhatsApp chat. The bubble appears above the message box (only inside chats).' },
+  { icon: 'gesture-tap-button', text: 'Tap the bubble for the toolbar. Touching anything else closes it.' },
+  { icon: 'creation', text: '✨ Improve · 🌐 Translate · 💬 Smart replies: tap a suggestion to insert it.' },
+  { icon: 'microphone-outline', text: '🎙 Tap to dictate. Hold and glide to change the language.' },
+  { icon: 'account-voice', text: '🗣 Tap to record a voice note. Hold and glide to switch voices.' },
+  { icon: 'gesture-swipe-down', text: 'Drag the bubble to the bottom of the screen to turn ConvoAI off.' },
 ];
 
 export default function OnboardingScreen() {
@@ -84,18 +86,47 @@ export default function OnboardingScreen() {
   const { perms, allGranted, openOverlaySettings, openAccessibilitySettings, openAppInfo, requestMicrophone } =
     usePermissions();
   const [index, setIndex] = useState(0);
+  const [demoTried, setDemoTried] = useState(0);
+  const [voices, setVoices] = useState<TimbreVoice[]>([]);
+  const [voice, setVoice] = useState<string | null>(null);
   const step = STEPS[index];
   const isLast = index === STEPS.length - 1;
 
+  useEffect(() => {
+    IndicContext.getVoices().then(setVoices).catch(() => {});
+    IndicContext.getVoice().then(setVoice).catch(() => {});
+  }, []);
+
+  const pickVoice = useCallback(async (id: string) => {
+    setVoice(id);
+    await IndicContext.setVoice(id).catch(() => {});
+  }, []);
+
   const finish = useCallback(async () => {
+    await IndicContext.stopVoicePreview().catch(() => {});
     await setOnboarded(true);
     if (allGranted) await setCopilotEnabled(true).catch(() => {});
     if (router.canGoBack()) router.back();
     else router.replace('/');
   }, [allGranted, router, setCopilotEnabled]);
 
-  const grant = (perm: 'overlay' | 'accessibility' | 'microphone') =>
+  const go = (to: number) => {
+    IndicContext.stopVoicePreview().catch(() => {});
+    setIndex(to);
+  };
+
+  const grant = (perm: Perm) =>
     perm === 'overlay' ? openOverlaySettings() : perm === 'accessibility' ? openAccessibilitySettings() : requestMicrophone();
+
+  const nextLabel = isLast
+    ? allGranted
+      ? 'Turn on & finish'
+      : 'Finish'
+    : step.kind === 'try' && demoTried === 0
+      ? 'Skip demo'
+      : step.kind === 'voice' && voice
+        ? `Use ${voice}`
+        : 'Next';
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top, paddingBottom: insets.bottom }}>
@@ -103,106 +134,156 @@ export default function OnboardingScreen() {
       <View style={styles.topBar}>
         <StepDots count={STEPS.length} index={index} />
         {!isLast && (
-          <Pressable onPress={finish} hitSlop={10}>
+          <Pressable onPress={finish} hitSlop={10} accessibilityRole="button">
             <Text style={[font.bodyStrong, { color: c.textMuted }]}>Skip</Text>
           </Pressable>
         )}
       </View>
 
-      <ScrollView contentContainerStyle={styles.body}>
-        {step.kind === 'welcome' && (
-          <>
-            {/* Hero module: mascot, product name, value proposition */}
-            <Card variant="hero">
-              <AppMark size={72} />
-              <Text style={[font.label, { color: c.onPrimaryMuted, marginTop: space.lg }]}>Welcome to ConvoAI</Text>
-              <Text style={[font.display, { color: c.onPrimary, marginTop: space.xs }]}>Write better in every chat</Text>
-              <Text style={[font.body, { color: c.onPrimaryMuted, marginTop: space.sm }]}>
-                ConvoAI lives inside WhatsApp and understands the conversation you’re in.
-              </Text>
-            </Card>
-            {/* Lead feature + 2-column feature tiles */}
-            <Card variant="soft">
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <IconBadge icon={FEATURES[0].icon} color={c.onPrimary} bg={c.primary} size={44} />
-                <View style={{ flex: 1, marginLeft: space.md }}>
-                  <Text style={[font.heading, { color: c.primaryStrong }]}>{FEATURES[0].title}</Text>
-                  <Text style={[font.small, { color: c.primaryStrong, marginTop: 2 }]}>{FEATURES[0].body}</Text>
-                </View>
-              </View>
-            </Card>
-            <View style={{ flexDirection: 'row' }}>
-              {FEATURES.slice(1, 3).map((f, i) => (
-                <React.Fragment key={f.title}>
-                  {i > 0 && <View style={{ width: space.md }} />}
-                  <Tile>
-                    <IconBadge icon={f.icon} color={c.primaryStrong} bg={c.primarySoft} size={32} />
-                    <Text style={[font.bodyStrong, { color: c.text, marginTop: space.md }]}>{f.title}</Text>
-                    <Text style={[font.small, { color: c.textMuted, marginTop: space.xs }]}>{f.body}</Text>
-                  </Tile>
-                </React.Fragment>
-              ))}
-            </View>
-            {FEATURES.slice(3).map((f) => (
-              <Card key={f.title} style={{ marginTop: space.md }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <IconBadge icon={f.icon} color={c.primaryStrong} bg={c.primarySoft} />
-                  <View style={{ flex: 1, marginLeft: space.md }}>
-                    <Text style={[font.bodyStrong, { color: c.text }]}>{f.title}</Text>
-                    <Text style={[font.small, { color: c.textMuted, marginTop: 2 }]}>{f.body}</Text>
-                  </View>
-                </View>
-              </Card>
-            ))}
-          </>
-        )}
-
-        {step.kind === 'permission' && (
-          <PermissionStep
-            copy={PERMISSION_COPY[step.perm]}
-            status={perms[step.perm]}
-            stepNo={index}
-            onGrant={() => grant(step.perm)}
-            onAppInfo={step.perm === 'accessibility' ? openAppInfo : undefined}
-          />
-        )}
-
-        {step.kind === 'usage' && (
-          <>
-            <IconBadge icon="gesture-tap-button" color={c.onPrimary} bg={c.primary} size={64} />
-            <Text style={[font.title, { color: c.text, marginTop: space.lg }]}>Using the bubble</Text>
-            <Text style={[font.body, { color: c.textMuted, marginTop: space.sm, marginBottom: space.lg }]}>
-              Everything happens inside your chats. Nothing runs or uses AI until you tap a button.
-            </Text>
-            {USAGE.map((u, i) => (
-              <View key={i} style={styles.usageRow}>
-                <IconBadge icon={u.icon} color={c.primary} bg={c.primarySoft} size={34} />
-                <Text style={[font.body, { color: c.text, flex: 1, marginLeft: space.md }]}>{u.text}</Text>
-              </View>
-            ))}
-            {!allGranted && (
-              <View style={[styles.notice, { backgroundColor: c.warningSoft }]}>
-                <MaterialCommunityIcons name="alert-circle-outline" size={18} color={c.warning} />
-                <Text style={[font.small, { color: c.warning, marginLeft: space.sm, flex: 1 }]}>
-                  Some permissions are still missing. You can grant them later from Home.
+      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+        {/* key = index → each step animates in when it appears */}
+        <FadeIn key={index} from={16}>
+          {step.kind === 'welcome' && (
+            <>
+              <Card variant="hero">
+                <Pop>
+                  <AppMark size={72} />
+                </Pop>
+                <Text style={[font.label, { color: c.onPrimaryMuted, marginTop: space.lg }]}>Welcome to ConvoAI</Text>
+                <Text style={[font.display, { color: c.onPrimary, marginTop: space.xs }]}>Write better in every chat</Text>
+                <Text style={[font.body, { color: c.onPrimaryMuted, marginTop: space.sm }]}>
+                  ConvoAI lives inside WhatsApp and understands the conversation you’re in.
                 </Text>
+              </Card>
+              <FadeIn delay={120}>
+                <Card variant="soft">
+                  <View style={styles.row}>
+                    <IconBadge icon={FEATURES[0].icon} color={c.onPrimary} bg={c.primary} size={44} />
+                    <View style={{ flex: 1, marginLeft: space.md }}>
+                      <Text style={[font.heading, { color: c.primaryStrong }]}>{FEATURES[0].title}</Text>
+                      <Text style={[font.small, { color: c.primaryStrong, marginTop: 2 }]}>{FEATURES[0].body}</Text>
+                    </View>
+                  </View>
+                </Card>
+              </FadeIn>
+              <View style={styles.row}>
+                {FEATURES.slice(1, 3).map((f, i) => (
+                  <React.Fragment key={f.title}>
+                    {i > 0 && <View style={{ width: space.md }} />}
+                    <FadeIn delay={220 + i * 100} style={{ flex: 1 }}>
+                      <Tile>
+                        <IconBadge icon={f.icon} color={c.primaryStrong} bg={c.primarySoft} size={32} />
+                        <Text style={[font.bodyStrong, { color: c.text, marginTop: space.md }]}>{f.title}</Text>
+                        <Text style={[font.small, { color: c.textMuted, marginTop: space.xs }]}>{f.body}</Text>
+                      </Tile>
+                    </FadeIn>
+                  </React.Fragment>
+                ))}
               </View>
-            )}
-          </>
-        )}
+              {FEATURES.slice(3).map((f) => (
+                <FadeIn key={f.title} delay={420}>
+                  <Card style={{ marginTop: space.md }}>
+                    <View style={styles.row}>
+                      <IconBadge icon={f.icon} color={c.primaryStrong} bg={c.primarySoft} />
+                      <View style={{ flex: 1, marginLeft: space.md }}>
+                        <Text style={[font.bodyStrong, { color: c.text }]}>{f.title}</Text>
+                        <Text style={[font.small, { color: c.textMuted, marginTop: 2 }]}>{f.body}</Text>
+                      </View>
+                    </View>
+                  </Card>
+                </FadeIn>
+              ))}
+            </>
+          )}
+
+          {step.kind === 'try' && (
+            <>
+              <Text style={[font.label, { color: c.primaryStrong }]}>Try it</Text>
+              <Text style={[font.title, { color: c.text, marginTop: space.xs }]}>Here’s how it works in a chat</Text>
+              <Text style={[font.body, { color: c.textMuted, marginTop: space.sm, marginBottom: space.lg }]}>
+                This is a safe practice chat. Nothing is sent and no AI is used.
+              </Text>
+              <ToolbarDemo onProgress={setDemoTried} />
+              {demoTried >= 5 && (
+                <Pop style={{ marginTop: space.lg }}>
+                  <View style={[styles.notice, { backgroundColor: c.successSoft, marginTop: 0 }]}>
+                    <MaterialCommunityIcons name="party-popper" size={20} color={c.success} />
+                    <Text style={[font.bodyStrong, { color: c.success, marginLeft: space.sm }]}>You’ve tried everything!</Text>
+                  </View>
+                </Pop>
+              )}
+            </>
+          )}
+
+          {step.kind === 'voice' && (
+            <>
+              <Text style={[font.label, { color: c.primaryStrong }]}>Voice notes</Text>
+              <Text style={[font.title, { color: c.text, marginTop: space.xs }]}>Choose your voice</Text>
+              <Text style={[font.body, { color: c.textMuted, marginTop: space.sm, marginBottom: space.lg }]}>
+                When you record a 🗣 voice note, ConvoAI speaks your words in this voice. Tap ▶ to hear a sample. You
+                can change it any time from Home or by holding 🗣 in the toolbar.
+              </Text>
+              <VoicePicker voices={voices} selected={voice} onSelect={pickVoice} />
+            </>
+          )}
+
+          {step.kind === 'permission' && (
+            <PermissionStep
+              copy={PERMISSION_COPY[step.perm]}
+              status={perms[step.perm]}
+              stepNo={(['overlay', 'accessibility', 'microphone'] as Perm[]).indexOf(step.perm) + 1}
+              onGrant={() => grant(step.perm)}
+              onAppInfo={step.perm === 'accessibility' ? openAppInfo : undefined}
+            />
+          )}
+
+          {step.kind === 'done' && (
+            <>
+              <View style={{ alignItems: 'center', marginBottom: space.xl }}>
+                <Pop>
+                  <AppMark size={88} />
+                </Pop>
+                <FadeIn delay={150}>
+                  <Text style={[font.title, { color: c.text, marginTop: space.lg, textAlign: 'center' }]}>
+                    You’re all set
+                  </Text>
+                  <Text style={[font.body, { color: c.textMuted, marginTop: space.sm, textAlign: 'center' }]}>
+                    Nothing runs or uses AI until you tap a button.
+                  </Text>
+                </FadeIn>
+              </View>
+              {RECAP.map((r, i) => (
+                <FadeIn key={i} delay={250 + i * 70}>
+                  <View style={styles.recapRow}>
+                    <IconBadge icon={r.icon} color={c.primaryStrong} bg={c.primarySoft} size={34} />
+                    <Text style={[font.body, { color: c.text, flex: 1, marginLeft: space.md }]}>{r.text}</Text>
+                  </View>
+                </FadeIn>
+              ))}
+              {!allGranted && (
+                <View style={[styles.notice, { backgroundColor: c.warningSoft }]}>
+                  <MaterialCommunityIcons name="alert-circle-outline" size={18} color={c.warning} />
+                  <Text style={[font.small, { color: c.warning, marginLeft: space.sm, flex: 1 }]}>
+                    Some permissions are still missing. You can grant them later from Home.
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
+        </FadeIn>
       </ScrollView>
 
       {/* Bottom bar */}
-      <View style={styles.bottomBar}>
+      <View style={[styles.bottomBar, { borderTopColor: c.border }]}>
         {index > 0 ? (
-          <PrimaryButton title="Back" variant="ghost" onPress={() => setIndex(index - 1)} style={{ flex: 1 }} />
+          <PrimaryButton title="Back" variant="ghost" onPress={() => go(index - 1)} style={{ flex: 1 }} />
         ) : (
           <View style={{ flex: 1 }} />
         )}
         <PrimaryButton
-          title={isLast ? (allGranted ? 'Turn on & finish' : 'Finish') : 'Next'}
+          title={nextLabel}
           icon={isLast ? 'check' : 'arrow-right'}
-          onPress={isLast ? finish : () => setIndex(index + 1)}
+          onPress={isLast ? finish : () => go(index + 1)}
           style={{ flex: 2, marginLeft: space.md }}
         />
       </View>
@@ -228,28 +309,45 @@ function PermissionStep({
   return (
     <>
       <Text style={[font.label, { color: c.primaryStrong }]}>Permission {stepNo} of 3</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.md }}>
-        <IconBadge icon={copy.icon} color={c.onPrimary} bg={c.primary} size={56} />
+      <View style={[styles.row, { marginTop: space.md }]}>
+        {/* Pulses while waiting; pops into a check once granted */}
+        {granted ? (
+          <Pop key="granted">
+            <IconBadge icon="check-bold" color={c.onPrimary} bg={c.success} size={56} />
+          </Pop>
+        ) : (
+          <Pulse>
+            <IconBadge icon={copy.icon} color={c.onPrimary} bg={c.primary} size={56} />
+          </Pulse>
+        )}
         <Text style={[font.title, { color: c.text, marginLeft: space.md, flex: 1 }]}>{copy.title}</Text>
       </View>
       <Text style={[font.body, { color: c.textMuted, marginTop: space.lg }]}>{copy.why}</Text>
 
       <View style={[styles.stepsBox, { backgroundColor: c.surface, borderColor: c.border }]}>
         {copy.steps.map((s, i) => (
-          <View key={i} style={{ flexDirection: 'row', marginBottom: i < copy.steps.length - 1 ? space.md : 0 }}>
-            <View style={[styles.stepNum, { backgroundColor: c.primarySoft }]}>
-              <Text style={[font.smallStrong, { color: c.primaryStrong }]}>{i + 1}</Text>
+          <FadeIn key={i} delay={100 + i * 90}>
+            <View style={{ flexDirection: 'row', marginBottom: i < copy.steps.length - 1 ? space.md : 0 }}>
+              <View style={[styles.stepNum, { backgroundColor: granted ? c.successSoft : c.primarySoft }]}>
+                {granted ? (
+                  <MaterialCommunityIcons name="check" size={14} color={c.success} />
+                ) : (
+                  <Text style={[font.smallStrong, { color: c.primaryStrong }]}>{i + 1}</Text>
+                )}
+              </View>
+              <Text style={[font.body, { color: c.text, flex: 1, marginLeft: space.md }]}>{s}</Text>
             </View>
-            <Text style={[font.body, { color: c.text, flex: 1, marginLeft: space.md }]}>{s}</Text>
-          </View>
+          </FadeIn>
         ))}
       </View>
 
       {granted ? (
-        <View style={[styles.notice, { backgroundColor: c.successSoft }]}>
-          <MaterialCommunityIcons name="check-circle" size={20} color={c.success} />
-          <Text style={[font.bodyStrong, { color: c.success, marginLeft: space.sm }]}>Granted, all good</Text>
-        </View>
+        <Pop>
+          <View style={[styles.notice, { backgroundColor: c.successSoft }]}>
+            <MaterialCommunityIcons name="check-circle" size={20} color={c.success} />
+            <Text style={[font.bodyStrong, { color: c.success, marginLeft: space.sm }]}>Granted, all good. Tap Next.</Text>
+          </View>
+        </Pop>
       ) : (
         <>
           <PrimaryButton title={copy.button} icon="open-in-new" onPress={onGrant} style={{ marginTop: space.lg }} />
@@ -271,9 +369,15 @@ const styles = StyleSheet.create({
     paddingVertical: space.lg,
   },
   body: { paddingHorizontal: space.xl, paddingBottom: space.xl },
-  usageRow: { flexDirection: 'row', alignItems: 'center', marginBottom: space.md },
+  row: { flexDirection: 'row', alignItems: 'center' },
+  recapRow: { flexDirection: 'row', alignItems: 'center', marginBottom: space.md },
   stepsBox: { marginTop: space.lg, padding: space.lg, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
   stepNum: { width: 24, height: 24, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
   notice: { flexDirection: 'row', alignItems: 'center', marginTop: space.lg, padding: space.md, borderRadius: radius.md },
-  bottomBar: { flexDirection: 'row', paddingHorizontal: space.xl, paddingVertical: space.md },
+  bottomBar: {
+    flexDirection: 'row',
+    paddingHorizontal: space.xl,
+    paddingVertical: space.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
 });

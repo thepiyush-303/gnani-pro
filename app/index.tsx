@@ -31,6 +31,7 @@ import {
   StatusPill,
   Tile,
 } from '../src/ui/components';
+import { VoicePicker } from '../src/ui/VoicePicker';
 
 const LANGUAGES: { code: string; label: string }[] = [
   { code: 'en-IN', label: 'English' },
@@ -266,38 +267,11 @@ export default function HomeScreen() {
       )}
 
       {openPicker === 'voice' && (
-        <Card style={{ marginTop: space.md, paddingVertical: space.sm }}>
-          {voices.map((v, i) => {
-            const selected = voice === v.id;
-            return (
-              <Pressable
-                key={v.id}
-                onPress={() => pickVoice(v.id)}
-                accessibilityRole="radio"
-                accessibilityState={{ selected }}
-                android_ripple={{ color: c.primarySoft }}
-                style={[styles.voiceRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border }]}
-              >
-                <IconBadge
-                  icon={v.gender === 'male' ? 'face-man-outline' : 'face-woman-outline'}
-                  color={selected ? c.onPrimary : c.primaryStrong}
-                  bg={selected ? c.primary : c.primarySoft}
-                  size={36}
-                />
-                <View style={{ flex: 1, marginLeft: space.md }}>
-                  <Text style={[selected ? font.bodyStrong : font.body, { color: c.text }]}>{v.id}</Text>
-                  <Text style={[font.small, { color: c.textMuted }]}>
-                    {v.gender === 'male' ? 'Male' : 'Female'} · {v.style}
-                  </Text>
-                </View>
-                <MaterialCommunityIcons
-                  name={selected ? 'radiobox-marked' : 'radiobox-blank'}
-                  size={22}
-                  color={selected ? c.primary : c.textFaint}
-                />
-              </Pressable>
-            );
-          })}
+        <Card style={{ marginTop: space.md }}>
+          <Text style={[font.small, { color: c.textMuted, marginBottom: space.md }]}>
+            The voice 🗣 voice notes are spoken in. Tap ▶ to hear a sample.
+          </Text>
+          <VoicePicker voices={voices} selected={voice} onSelect={pickVoice} />
         </Card>
       )}
 
@@ -404,6 +378,5 @@ const styles = StyleSheet.create({
   divider: { height: StyleSheet.hairlineWidth },
   wrap: { flexDirection: 'row', flexWrap: 'wrap' },
   tileRow: { flexDirection: 'row', alignItems: 'stretch' },
-  voiceRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: space.md, borderRadius: radius.md },
   summary: { marginTop: space.lg, padding: space.lg, borderRadius: radius.md },
 });

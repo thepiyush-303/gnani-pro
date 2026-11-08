@@ -148,6 +148,25 @@ class IndicContextModule : Module() {
             (VoiceChangerController.VOICES.firstOrNull { it.id == id } ?: VoiceChangerController.VOICES.first()).id
         }
 
+        /** Plays a short sample of a Timbre voice in the current speech language (cached after the first call). */
+        AsyncFunction("previewVoice") { id: String, promise: Promise ->
+            val v = VoiceChangerController.VOICES.firstOrNull { it.id == id }
+            if (v == null) {
+                promise.reject("ERR_VOICE", "Unknown voice: $id", null)
+                return@AsyncFunction
+            }
+            val lang = ctx.getSharedPreferences("indic_context_prefs", Context.MODE_PRIVATE)
+                .getString("gnani_language", "en-IN") ?: "en-IN"
+            VoicePreviewPlayer.play(ctx, v.id, lang) { error ->
+                if (error == null) promise.resolve(v.id) else promise.reject("ERR_PREVIEW", error, null)
+            }
+        }
+
+        AsyncFunction("stopVoicePreview") {
+            VoicePreviewPlayer.stop()
+            Unit
+        }
+
         AsyncFunction("setVoice") { id: String ->
             val v = VoiceChangerController.VOICES.firstOrNull { it.id == id }
                 ?: throw Exception("Unknown voice: $id")
