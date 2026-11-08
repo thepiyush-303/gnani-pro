@@ -23,7 +23,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="💡 Smart Replies"
-            android:textColor="#00E5FF"
+            android:textColor="#FDA4AF"
             android:textSize="12sp"
             android:textStyle="bold"
             android:letterSpacing="0.04" />
@@ -34,7 +34,7 @@
             android:layout_height="28dp"
             android:gravity="center"
             android:text="✕"
-            android:textColor="#94A3B8"
+            android:textColor="#F5C2CB"
             android:textSize="15sp"
             android:clickable="true"
             android:focusable="true" />
@@ -45,8 +45,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Tap to insert directly into chat"
-        android:textColor="#64748B"
-        android:textSize="10sp"
+        android:textColor="#D98A9A"
+        android:textSize="11sp"
         android:paddingBottom="8dp" />
 
     <!-- 1. Suggestion Chip 1 -->
@@ -63,7 +63,7 @@
         android:paddingTop="6dp"
         android:paddingBottom="6dp"
         android:text="Suggestion 1"
-        android:textColor="#FAFAFA"
+        android:textColor="#FFF1F2"
         android:textSize="12sp"
         android:clickable="true"
         android:focusable="true" />
@@ -82,7 +82,7 @@
         android:paddingTop="6dp"
         android:paddingBottom="6dp"
         android:text="Suggestion 2"
-        android:textColor="#FAFAFA"
+        android:textColor="#FFF1F2"
         android:textSize="12sp"
         android:clickable="true"
         android:focusable="true" />
@@ -100,7 +100,7 @@
         android:paddingTop="6dp"
         android:paddingBottom="6dp"
         android:text="Suggestion 3"
-        android:textColor="#FAFAFA"
+        android:textColor="#FFF1F2"
         android:textSize="12sp"
         android:clickable="true"
         android:focusable="true" />

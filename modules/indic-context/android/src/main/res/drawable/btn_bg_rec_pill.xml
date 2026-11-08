@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- btn_bg_rec_pill.xml - Voice changer while recording: red pill (button widens to show the timer) -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="rectangle">
-    <solid android:color="#E11D48" />
-    <corners android:radius="19dp" />
+<!-- btn_bg_rec_pill.xml - Voice note recording: button widens into a rose 8dp pill with the timer. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#C8143F" />
+    <corners android:radius="8dp" />
     <stroke android:width="1.5dp" android:color="#FDA4AF" />
 </shape>

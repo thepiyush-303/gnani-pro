@@ -13,7 +13,7 @@ import { useCopilot } from '../src/hooks/CopilotBridge';
 import { usePermissions, type PermissionStatus } from '../src/hooks/usePermissions';
 import { setOnboarded } from '../src/services/onboardingStore';
 import { font, radius, space, useTheme } from '../src/ui/theme';
-import { AppMark, IconBadge, type IconName, PrimaryButton, StepDots } from '../src/ui/components';
+import { AppMark, Card, IconBadge, type IconName, PrimaryButton, StepDots, Tile } from '../src/ui/components';
 
 type Step =
   | { kind: 'welcome' }
@@ -43,7 +43,7 @@ const PERMISSION_COPY: Record<
     icon: 'layers-outline',
     title: 'Display over other apps',
     why: 'Lets the assistant bubble and toolbar float on top of WhatsApp.',
-    steps: ['Tap “Open settings”.', 'Find IndicContext Assistant in the list.', 'Turn on “Allow display over other apps”, then come back.'],
+    steps: ['Tap “Open settings”.', 'Find ConvoAI in the list.', 'Turn on “Allow display over other apps”, then come back.'],
     button: 'Open settings',
   },
   accessibility: {
@@ -52,7 +52,7 @@ const PERMISSION_COPY: Record<
     why: 'Lets the assistant read the open chat (so suggestions fit the conversation) and put text into the message box. It only works inside WhatsApp and never stores chats.',
     steps: [
       'Tap “Open settings”, then Installed apps / Downloaded apps.',
-      'Choose IndicContext Assistant and turn it on.',
+      'Choose ConvoAI and turn it on.',
       'Switch greyed out with “Restricted setting”? Tap “App info” below → ⋮ (top right) → Allow restricted settings, then try again.',
     ],
     button: 'Open settings',
@@ -104,7 +104,7 @@ export default function OnboardingScreen() {
         <StepDots count={STEPS.length} index={index} />
         {!isLast && (
           <Pressable onPress={finish} hitSlop={10}>
-            <Text style={[font.body, { color: c.textMuted, fontWeight: '600' }]}>Skip</Text>
+            <Text style={[font.bodyStrong, { color: c.textMuted }]}>Skip</Text>
           </Pressable>
         )}
       </View>
@@ -112,23 +112,47 @@ export default function OnboardingScreen() {
       <ScrollView contentContainerStyle={styles.body}>
         {step.kind === 'welcome' && (
           <>
-            <View style={{ alignItems: 'center', marginBottom: space.xl }}>
-              <AppMark size={84} />
-              <Text style={[font.title, { color: c.text, marginTop: space.lg, textAlign: 'center' }]}>
-                Write better in every chat
+            {/* Hero module: mascot, product name, value proposition */}
+            <Card variant="hero">
+              <AppMark size={72} />
+              <Text style={[font.label, { color: c.onPrimaryMuted, marginTop: space.lg }]}>Welcome to ConvoAI</Text>
+              <Text style={[font.display, { color: c.onPrimary, marginTop: space.xs }]}>Write better in every chat</Text>
+              <Text style={[font.body, { color: c.onPrimaryMuted, marginTop: space.sm }]}>
+                ConvoAI lives inside WhatsApp and understands the conversation you’re in.
               </Text>
-              <Text style={[font.body, { color: c.textMuted, marginTop: space.sm, textAlign: 'center' }]}>
-                IndicContext lives inside WhatsApp and understands the conversation you’re in.
-              </Text>
-            </View>
-            {FEATURES.map((f) => (
-              <View key={f.title} style={[styles.feature, { backgroundColor: c.surface, borderColor: c.border }]}>
-                <IconBadge icon={f.icon} color={c.primary} bg={c.primarySoft} />
+            </Card>
+            {/* Lead feature + 2-column feature tiles */}
+            <Card variant="soft">
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <IconBadge icon={FEATURES[0].icon} color={c.onPrimary} bg={c.primary} size={44} />
                 <View style={{ flex: 1, marginLeft: space.md }}>
-                  <Text style={[font.body, { color: c.text, fontWeight: '700' }]}>{f.title}</Text>
-                  <Text style={[font.small, { color: c.textMuted, marginTop: 2 }]}>{f.body}</Text>
+                  <Text style={[font.heading, { color: c.primaryStrong }]}>{FEATURES[0].title}</Text>
+                  <Text style={[font.small, { color: c.primaryStrong, marginTop: 2 }]}>{FEATURES[0].body}</Text>
                 </View>
               </View>
+            </Card>
+            <View style={{ flexDirection: 'row' }}>
+              {FEATURES.slice(1, 3).map((f, i) => (
+                <React.Fragment key={f.title}>
+                  {i > 0 && <View style={{ width: space.md }} />}
+                  <Tile>
+                    <IconBadge icon={f.icon} color={c.primaryStrong} bg={c.primarySoft} size={32} />
+                    <Text style={[font.bodyStrong, { color: c.text, marginTop: space.md }]}>{f.title}</Text>
+                    <Text style={[font.small, { color: c.textMuted, marginTop: space.xs }]}>{f.body}</Text>
+                  </Tile>
+                </React.Fragment>
+              ))}
+            </View>
+            {FEATURES.slice(3).map((f) => (
+              <Card key={f.title} style={{ marginTop: space.md }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <IconBadge icon={f.icon} color={c.primaryStrong} bg={c.primarySoft} />
+                  <View style={{ flex: 1, marginLeft: space.md }}>
+                    <Text style={[font.bodyStrong, { color: c.text }]}>{f.title}</Text>
+                    <Text style={[font.small, { color: c.textMuted, marginTop: 2 }]}>{f.body}</Text>
+                  </View>
+                </View>
+              </Card>
             ))}
           </>
         )}
@@ -203,7 +227,7 @@ function PermissionStep({
   const granted = status === 'granted';
   return (
     <>
-      <Text style={[font.label, { color: c.primary }]}>Permission {stepNo} of 3</Text>
+      <Text style={[font.label, { color: c.primaryStrong }]}>Permission {stepNo} of 3</Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.md }}>
         <IconBadge icon={copy.icon} color={c.onPrimary} bg={c.primary} size={56} />
         <Text style={[font.title, { color: c.text, marginLeft: space.md, flex: 1 }]}>{copy.title}</Text>
@@ -214,7 +238,7 @@ function PermissionStep({
         {copy.steps.map((s, i) => (
           <View key={i} style={{ flexDirection: 'row', marginBottom: i < copy.steps.length - 1 ? space.md : 0 }}>
             <View style={[styles.stepNum, { backgroundColor: c.primarySoft }]}>
-              <Text style={[font.small, { color: c.primary, fontWeight: '800' }]}>{i + 1}</Text>
+              <Text style={[font.smallStrong, { color: c.primaryStrong }]}>{i + 1}</Text>
             </View>
             <Text style={[font.body, { color: c.text, flex: 1, marginLeft: space.md }]}>{s}</Text>
           </View>
@@ -224,7 +248,7 @@ function PermissionStep({
       {granted ? (
         <View style={[styles.notice, { backgroundColor: c.successSoft }]}>
           <MaterialCommunityIcons name="check-circle" size={20} color={c.success} />
-          <Text style={[font.body, { color: c.success, marginLeft: space.sm, fontWeight: '700' }]}>Granted, all good</Text>
+          <Text style={[font.bodyStrong, { color: c.success, marginLeft: space.sm }]}>Granted, all good</Text>
         </View>
       ) : (
         <>
@@ -247,17 +271,9 @@ const styles = StyleSheet.create({
     paddingVertical: space.lg,
   },
   body: { paddingHorizontal: space.xl, paddingBottom: space.xl },
-  feature: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: space.md,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: space.sm,
-  },
   usageRow: { flexDirection: 'row', alignItems: 'center', marginBottom: space.md },
   stepsBox: { marginTop: space.lg, padding: space.lg, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
-  stepNum: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  stepNum: { width: 24, height: 24, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
   notice: { flexDirection: 'row', alignItems: 'center', marginTop: space.lg, padding: space.md, borderRadius: radius.md },
   bottomBar: { flexDirection: 'row', paddingHorizontal: space.xl, paddingVertical: space.md },
 });

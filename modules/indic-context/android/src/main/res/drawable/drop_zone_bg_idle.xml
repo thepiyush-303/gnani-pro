@@ -1,9 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- drop_zone_bg_idle.xml - Drop zone idle circle (dark glass) -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="oval">
-    <solid android:color="#D91E1E20" />
-    <stroke android:width="1.5dp" android:color="#40FFFFFF" />
-    <size android:width="60dp" android:height="60dp" />
+<!-- drop_zone_bg_idle.xml - Drag-to-disable target (idle). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <solid android:color="#F51C0A12" />
+    <stroke android:width="1.5dp" android:color="#66FDA4AF" />
 </shape>
-

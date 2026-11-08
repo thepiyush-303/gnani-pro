@@ -1,16 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- btn_bg_toolbar.xml - 40dp circular toolbar button with ripple feedback -->
-<ripple xmlns:android="http://schemas.android.com/apk/res/android"
-    android:color="#40FFFFFF">
+<!-- btn_bg_toolbar.xml - Toolbar button: 8dp rounded square with rose ripple. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#66C8143F">
     <item android:id="@android:id/mask">
-        <shape android:shape="oval">
-            <solid android:color="#FFFFFFFF" />
-        </shape>
+        <shape android:shape="rectangle"><solid android:color="#FFFFFFFF" /><corners android:radius="8dp" /></shape>
     </item>
     <item>
-        <shape android:shape="oval">
-            <solid android:color="#14FFFFFF" />
-            <stroke android:width="1dp" android:color="#1AFFFFFF" />
+        <shape android:shape="rectangle">
+            <solid android:color="#14FECDD3" />
+            <corners android:radius="8dp" />
+            <stroke android:width="1dp" android:color="#1FFECDD3" />
         </shape>
     </item>
 </ripple>

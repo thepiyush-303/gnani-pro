@@ -1,4 +1,4 @@
-export const APP_NAME = 'IndicContext Assistant';
+export const APP_NAME = 'ConvoAI';
 export const PACKAGE_NAME = 'com.indiccontext.assistant';
 
 export const BUFFER_MAX_CAPACITY = 30;

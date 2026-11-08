@@ -26,14 +26,14 @@
         android:clickable="true"
         android:focusable="true"
         android:elevation="8dp"
-        android:contentDescription="Open assistant">
+        android:contentDescription="Open ConvoAI">
 
         <ImageView
             android:id="@+id/disk_icon"
-            android:layout_width="26dp"
-            android:layout_height="26dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
             android:layout_gravity="center"
-            android:src="@drawable/ic_copilot"
+            android:src="@drawable/ic_convo_mascot"
             android:importantForAccessibility="no" />
     </FrameLayout>
 
@@ -106,7 +106,7 @@
                     android:paddingTop="1dp"
                     android:paddingBottom="1dp"
                     android:text="EN"
-                    android:textColor="#86EFAC"
+                    android:textColor="#FECDD3"
                     android:textSize="7sp"
                     android:textStyle="bold" />
             </FrameLayout>
@@ -142,7 +142,7 @@
                     android:paddingTop="1dp"
                     android:paddingBottom="1dp"
                     android:text="DEV"
-                    android:textColor="#F0ABFC"
+                    android:textColor="#FECDD3"
                     android:textSize="7sp"
                     android:textStyle="bold" />
                 <!-- Recording: button widens into a red pill with pulsing dot + m:ss -->
@@ -220,7 +220,7 @@
                     android:paddingTop="1dp"
                     android:paddingBottom="1dp"
                     android:text="EN"
-                    android:textColor="#67E8F9"
+                    android:textColor="#FECDD3"
                     android:textSize="7sp"
                     android:textStyle="bold" />
             </FrameLayout>

@@ -95,14 +95,15 @@ function withIndicContextStrings(expoConfig) {
   return withStringsXml(expoConfig, (config) => {
     config.modResults = config.modResults || { resources: { string: [] } };
     const strings = config.modResults.resources.string || [];
-    const exists = strings.some((s) => s.$.name === 'accessibility_service_description');
-    if (!exists) {
-      strings.push({
-        $: { name: 'accessibility_service_description' },
-        _: 'IndicContext Assistant captures visible chat text in supported messaging apps to provide contextual AI suggestions and smart replies. No data is stored on disk.',
-      });
-      config.modResults.resources.string = strings;
+    const text =
+      'ConvoAI captures visible chat text in supported messaging apps to provide contextual AI suggestions and smart replies. No data is stored on disk.';
+    const existing = strings.find((s) => s.$.name === 'accessibility_service_description');
+    if (existing) {
+      existing._ = text; // keep the description in sync with the app name on every prebuild
+    } else {
+      strings.push({ $: { name: 'accessibility_service_description' }, _: text });
     }
+    config.modResults.resources.string = strings;
     return config;
   });
 }

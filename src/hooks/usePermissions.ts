@@ -57,7 +57,7 @@ export function usePermissions() {
       if (Platform.OS === 'android') {
         const res = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO, {
           title: 'Microphone',
-          message: 'IndicContext needs the microphone for dictation and voice notes.',
+          message: 'ConvoAI needs the microphone for dictation and voice notes.',
           buttonPositive: 'Allow',
           buttonNegative: 'Not now',
         });

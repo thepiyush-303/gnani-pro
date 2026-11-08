@@ -36,7 +36,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
         android:text="Drop to disable"
-        android:textColor="#94A3B8"
+        android:textColor="#F5C2CB"
         android:textSize="11sp"
         android:textStyle="bold" />
 </LinearLayout>

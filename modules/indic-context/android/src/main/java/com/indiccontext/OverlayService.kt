@@ -424,6 +424,7 @@ class OverlayService : Service() {
 
         try {
             val dz = LayoutInflater.from(this).inflate(R.layout.overlay_drop_zone, null)
+            OverlayFonts.apply(dz)
             val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             } else {
@@ -473,14 +474,14 @@ class OverlayService : Service() {
         if (isHovering) {
             circle?.setBackgroundResource(R.drawable.drop_zone_bg_active)
             icon?.animate()?.scaleX(1.2f)?.scaleY(1.2f)?.setDuration(120)?.start()
-            label?.setTextColor(Color.parseColor("#EF4444"))
+            label?.setTextColor(Color.parseColor("#FFF1F2"))
             try {
                 overlayRootView?.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
             } catch (e: Exception) {}
         } else {
             circle?.setBackgroundResource(R.drawable.drop_zone_bg_idle)
             icon?.animate()?.scaleX(1.0f)?.scaleY(1.0f)?.setDuration(120)?.start()
-            label?.setTextColor(Color.parseColor("#94A3B8"))
+            label?.setTextColor(Color.parseColor("#F5C2CB"))
         }
     }
 
@@ -518,7 +519,7 @@ class OverlayService : Service() {
             .apply()
 
         IndicContextModule.instance?.emitCopilotDisabled()
-        Toast.makeText(applicationContext, "Assistant Copilot disabled", Toast.LENGTH_SHORT).show()
+        Toast.makeText(applicationContext, "ConvoAI turned off", Toast.LENGTH_SHORT).show()
         stopSelf()
     }
 
@@ -594,6 +595,7 @@ class OverlayService : Service() {
                     gravity = first.gravity
                     setPadding(first.paddingLeft, first.paddingTop, first.paddingRight, first.paddingBottom)
                     setTextColor(first.currentTextColor)
+                    typeface = first.typeface
                     setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, first.textSize)
                     setBackgroundResource(R.drawable.language_pill_bg)
                     isClickable = true
@@ -633,6 +635,7 @@ class OverlayService : Service() {
             }
 
             val view = LayoutInflater.from(this).inflate(R.layout.overlay_recommendations, null)
+            OverlayFonts.apply(view)
             bindCard(view, title, subtitle, chips)
             view.findViewById<View>(R.id.btn_close_recommendations)?.setOnClickListener {
                 hideRecommendations()
@@ -999,6 +1002,7 @@ class OverlayService : Service() {
 
     private fun inflateOverlayView(wm: WindowManager): View {
         val view = LayoutInflater.from(this).inflate(R.layout.overlay_panel, null)
+        OverlayFonts.apply(view)
 
         val diskContainer = view.findViewById<FrameLayout>(R.id.disk_container)
         val toolbarContainer = view.findViewById<LinearLayout>(R.id.toolbar_container)
@@ -1551,7 +1555,7 @@ class OverlayService : Service() {
     private fun buildNotification(): Notification {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(
-                NOTIF_CHANNEL_ID, "IndicContext Copilot",
+                NOTIF_CHANNEL_ID, "ConvoAI",
                 NotificationManager.IMPORTANCE_LOW
             ).apply { description = "Keeps copilot ready"; setShowBadge(false) }
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
@@ -1568,7 +1572,7 @@ class OverlayService : Service() {
         else @Suppress("DEPRECATION") Notification.Builder(this)
 
         return builder
-            .setContentTitle("IndicContext Copilot")
+            .setContentTitle("ConvoAI")
             .setContentText("Active in WhatsApp.")
             .setSmallIcon(R.drawable.ic_notification)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPi)

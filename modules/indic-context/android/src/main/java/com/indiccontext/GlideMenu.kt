@@ -52,9 +52,9 @@ class GlideMenu(private val context: Context, private val wm: WindowManager) {
         }
         card.addView(TextView(context).apply {
             text = title
-            setTextColor(Color.parseColor("#00E5FF"))
+            setTextColor(Color.parseColor("#FDA4AF"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-            setTypeface(typeface, Typeface.BOLD)
+            OverlayFonts.semibold(context)?.let { typeface = it } ?: setTypeface(typeface, Typeface.BOLD)
             letterSpacing = 0.05f
             setPadding(dpi(6f), 0, dpi(6f), dpi(6f))
         })
@@ -191,8 +191,10 @@ class GlideMenu(private val context: Context, private val wm: WindowManager) {
     private fun styleRow(item: Item, row: TextView, hovered: Boolean) {
         val selected = item.key == selectedKey
         row.setBackgroundResource(if (hovered) R.drawable.language_pill_selected_bg else R.drawable.language_pill_bg)
-        row.setTextColor(Color.parseColor(if (hovered || selected) "#00E5FF" else "#FAFAFA"))
-        row.setTypeface(null, if (hovered || selected) Typeface.BOLD else Typeface.NORMAL)
+        row.setTextColor(Color.parseColor(if (hovered || selected) "#FDA4AF" else "#FFF1F2"))
+        val face = if (hovered || selected) OverlayFonts.semibold(context) else OverlayFonts.medium(context)
+        if (face != null) row.typeface = face
+        else row.setTypeface(null, if (hovered || selected) Typeface.BOLD else Typeface.NORMAL)
         row.animate().scaleX(if (hovered) 1.04f else 1f).scaleY(if (hovered) 1.04f else 1f).setDuration(70).start()
     }
 }

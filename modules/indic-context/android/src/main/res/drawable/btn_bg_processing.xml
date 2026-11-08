@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- btn_bg_processing.xml - Toolbar button while transcribing / generating: accent ring (pulsed in code) -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
-    <solid android:color="#2E7C3AED" />
-    <stroke android:width="2dp" android:color="#C4B5FD" />
+<!-- btn_bg_processing.xml - Toolbar button while working (pulsed in code): rose ring. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#33C8143F" />
+    <corners android:radius="8dp" />
+    <stroke android:width="1.5dp" android:color="#FDA4AF" />
 </shape>

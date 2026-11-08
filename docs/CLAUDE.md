@@ -31,11 +31,12 @@ There are two kinds of Android build. Don't mix them up:
 
 ### High-Level Components
 
-1. **Expo/React Native app (`app/`)**. Theme follows the system (`src/ui/theme.ts`; `expo-system-ui` makes Android honour it).
+1. **Expo/React Native app (`app/`): "ConvoAI"**. Styling follows **`DESIGN.md`** (Rose palette, JetBrains Mono, Bento layout, radius 4/8/12); tokens live in `src/ui/theme.ts` (light = DESIGN tokens, dark = derived rose palette, following the system via `expo-system-ui`). Use `font.*` tokens (they carry `fontFamily`), never `fontWeight`. AA-contrast deviations from raw DESIGN values are listed in `docs/UI_REDESIGN.md`.
    - `app/_layout.tsx`: Stack (headers hidden) wrapped in `CopilotBridgeProvider` (`src/hooks/CopilotBridge.tsx`), the **only** place native overlay events are handled. ✨/💬 work whichever screen is open.
    - `app/index.tsx` (Home): status + on/off, permission checklist (`src/hooks/usePermissions.ts`), current chat + Catch-up summary, speech language + default voice (shared with the toolbar's glide menus via the bridge), how-to.
    - `app/onboarding.tsx`: 5-step tutorial (welcome, the 3 permissions with live status including Android 13+ "Allow restricted settings", using the bubble). Shown on first launch (`src/services/onboardingStore.ts`) and from Home.
-   - Shared UI: `src/ui/components.tsx`. App icon: `scripts/generateIcons.py` → `assets/*.png` → `app.json` → `npx expo prebuild --platform android`.
+   - Shared UI: `src/ui/components.tsx` (`Card` standard/feature/hero/soft, `Tile`, `Chip`, `PrimaryButton`, …). Icon: `assets/new-icon.png` (source) → `python3 scripts/generateIcons.py` (adaptive foreground) → `npx expo prebuild --platform android --no-install`.
+   - The overlay uses the same palette in fixed dark-rose glass; fonts via `OverlayFonts.kt`; bubble mascot `res/drawable-nodpi/ic_convo_mascot.png`.
 
 2. **Native Android Module (`modules/indic-context/`)**
    - A local Android library packaged as an Expo module (`indic-context` dependency in `package.json`).

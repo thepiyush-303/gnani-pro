@@ -1,23 +1,34 @@
 /**
- * App theme: light + dark palettes that follow the system setting
- * (app.json `userInterfaceStyle: "automatic"`), plus spacing/radius/type tokens.
- * The floating overlay over WhatsApp stays dark glass regardless (native).
+ * ConvoAI theme — implements DESIGN.md (gnani-pro Design System):
+ *   Rose colour direction · JetBrains Mono · 4/8/12 radius · 4–48 spacing · Bento layout.
+ *
+ * Light palette = DESIGN.md tokens. Dark palette = the same rose hues re-balanced
+ * for dark surfaces (the app follows the system theme). Every text/background
+ * pair below was chosen to meet WCAG AA (4.5:1 for body text).
  */
 
 import { useColorScheme } from 'react-native';
 
 export interface Palette {
+  /** Page background */
   bg: string;
+  /** Card surface */
   surface: string;
+  /** Muted surface (chips, inset areas) */
   surfaceAlt: string;
+  /** Hairline borders */
   border: string;
+  /** Strong borders: selected / focus */
+  borderStrong: string;
   text: string;
   textMuted: string;
   textFaint: string;
   primary: string;
+  primaryStrong: string;
   primarySoft: string;
   onPrimary: string;
-  accent: string;
+  /** Muted text on the primary (hero) surface */
+  onPrimaryMuted: string;
   success: string;
   successSoft: string;
   warning: string;
@@ -26,58 +37,83 @@ export interface Palette {
   dangerSoft: string;
 }
 
-const dark: Palette = {
-  bg: '#0B1020',
-  surface: '#141A2E',
-  surfaceAlt: '#1B2340',
-  border: '#232C4A',
-  text: '#F1F5F9',
-  textMuted: '#A3AEC2',
-  textFaint: '#6B7690',
-  primary: '#6366F1',
-  primarySoft: '#262A5C',
-  onPrimary: '#FFFFFF',
-  accent: '#22D3EE',
-  success: '#22C55E',
-  successSoft: '#123326',
-  warning: '#F59E0B',
-  warningSoft: '#3A2A0E',
-  danger: '#F87171',
-  dangerSoft: '#3B1717',
-};
-
 const light: Palette = {
-  bg: '#F4F6FB',
+  bg: '#FFF1F2', // surface
   surface: '#FFFFFF',
-  surfaceAlt: '#EEF1FB',
-  border: '#E3E7F0',
-  text: '#0F172A',
-  textMuted: '#475569',
-  textFaint: '#8A94A6',
-  primary: '#4F46E5',
-  primarySoft: '#E7E8FD',
-  onPrimary: '#FFFFFF',
-  accent: '#0891B2',
-  success: '#16A34A',
-  successSoft: '#E3F6EA',
-  warning: '#B45309',
-  warningSoft: '#FDF1DC',
+  surfaceAlt: '#FFE4E8',
+  border: '#9F123926', // border @ 15% for hairlines
+  borderStrong: '#9F1239', // border
+  text: '#4C0519', // text
+  textMuted: '#831843', // primaryStrong
+  textFaint: '#9F1239', // border (7:1 on white)
+  // DESIGN primary #E11D48 gives only 4.28:1 under light text; deepened to #C8143F (5.27:1) per the
+  // design system's own rule "choose the more accessible option". Same rose hue.
+  primary: '#C8143F',
+  primaryStrong: '#831843',
+  primarySoft: '#FECDD3', // primarySoft
+  onPrimary: '#FFF1F2',
+  onPrimaryMuted: '#FFE4E8',
+  success: '#15803D', // DESIGN #16A34A is 3.0:1 on its soft surface; deepened for AA
+  successSoft: '#DCFCE7',
+  warning: '#B45309', // DESIGN warning #D97706 darkened for AA text contrast
+  warningSoft: '#FEF3C7',
   danger: '#DC2626',
-  dangerSoft: '#FDE8E8',
+  dangerSoft: '#FEE2E2',
 };
 
-export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
-export const radius = { sm: 10, md: 14, lg: 20, pill: 999 } as const;
+const dark: Palette = {
+  bg: '#14070C',
+  surface: '#1F0B13',
+  surfaceAlt: '#2C0F1C',
+  border: '#FECDD31F',
+  borderStrong: '#FB7185',
+  text: '#FFF1F2',
+  textMuted: '#F5C2CB',
+  textFaint: '#D98A9A',
+  primary: '#C8143F',
+  primaryStrong: '#FDA4AF',
+  primarySoft: '#3D0C1E',
+  onPrimary: '#FFF1F2',
+  onPrimaryMuted: '#FFE4E8',
+  success: '#4ADE80',
+  successSoft: '#0F2A1A',
+  warning: '#FBBF24',
+  warningSoft: '#3A260A',
+  danger: '#F87171',
+  dangerSoft: '#3B1414',
+};
+
+/** DESIGN.md spacing scale: 4/8/12/16/24/32/48 */
+export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32, section: 48 } as const;
+
+/** DESIGN.md radius: 4 compact controls · 8 cards/inputs · 12 large feature surfaces */
+export const radius = { sm: 4, md: 8, lg: 12 } as const;
+
+/** DESIGN.md motion durations (ms) */
+export const motion = { fast: 120, normal: 180, slow: 260 } as const;
+
+/** JetBrains Mono families (loaded in app/_layout.tsx). Allowed weights: 300/400/500/600. */
+export const fonts = {
+  light: 'JetBrainsMono_300Light',
+  regular: 'JetBrainsMono_400Regular',
+  medium: 'JetBrainsMono_500Medium',
+  semibold: 'JetBrainsMono_600SemiBold',
+} as const;
+
+/** Type scale. Default UI weight is 500 (medium); letter spacing stays 0. */
 export const font = {
-  title: { fontSize: 24, fontWeight: '800' as const, letterSpacing: -0.3 },
-  heading: { fontSize: 17, fontWeight: '700' as const },
-  body: { fontSize: 14, lineHeight: 20 },
-  small: { fontSize: 12, lineHeight: 17 },
-  label: { fontSize: 11, fontWeight: '700' as const, letterSpacing: 0.8, textTransform: 'uppercase' as const },
+  display: { fontFamily: fonts.semibold, fontSize: 22, lineHeight: 28 },
+  title: { fontFamily: fonts.semibold, fontSize: 20, lineHeight: 26 },
+  heading: { fontFamily: fonts.semibold, fontSize: 15, lineHeight: 21 },
+  body: { fontFamily: fonts.medium, fontSize: 13, lineHeight: 19 },
+  bodyStrong: { fontFamily: fonts.semibold, fontSize: 13, lineHeight: 19 },
+  small: { fontFamily: fonts.regular, fontSize: 12, lineHeight: 17 },
+  smallStrong: { fontFamily: fonts.semibold, fontSize: 12, lineHeight: 17 },
+  label: { fontFamily: fonts.semibold, fontSize: 11, lineHeight: 15, textTransform: 'uppercase' as const },
 };
 
 export function useTheme() {
   const scheme = useColorScheme();
-  const isDark = scheme !== 'light';
+  const isDark = scheme === 'dark';
   return { c: isDark ? dark : light, isDark };
 }

@@ -92,3 +92,40 @@ Translate details:
 - Roman Hinglish → HI: "कल मिलते है भाई, ५ बजे स्टेशन पे" ✅ converted, time kept (Devanagari numeral)
 - Only failure in the full run: the pre-existing flaky case (a reply to a 4-day-old plan says "today"). It's unrelated to this change and was already listed as a flash-lite weak spot in `AI_OVERHAUL.md`.
 
+---
+
+## Round 3 (2026-11-08): DESIGN.md system, rename to ConvoAI, new icon
+Source of truth: `DESIGN.md` (Rose · JetBrains Mono · Bento · radius 4/8/12 · spacing 4–48).
+
+**App (`src/ui/theme.ts`, `src/ui/components.tsx`, `app/*.tsx`)**
+- Light palette = DESIGN.md tokens. Dark palette = the same rose hues re-balanced for dark surfaces (the theme still follows the system).
+- JetBrains Mono 300/400/500/600 via `@expo-google-fonts/jetbrains-mono`, loaded in `_layout.tsx` (blank screen until loaded, so there's no font flash). Default weight 500, letter spacing 0. Android needs one family per weight, so `font.*` tokens carry `fontFamily` (no `fontWeight` anywhere).
+- Radius: 4 chips and labels · 8 cards, buttons and icon tiles · 12 hero and feature surfaces.
+- **Bento Home** (all original sections kept):
+  - hero module (mascot, ConvoAI, value line, status, on/off);
+  - setup checklist;
+  - two compact tiles (speech language, voice) that expand into their full pickers;
+  - current chat + catch-up (feature card);
+  - How it works as a lead card + 2-column tiles;
+  - tutorial link and footer.
+- Tutorial welcome step uses the same hero + lead + tiles composition.
+- Reduced motion: screen transitions turn off when the system "remove animations" setting is on.
+- **Contrast deviations (DESIGN.md: "choose the more accessible option"):**
+
+  | Token | DESIGN.md | Used | Why |
+  |---|---|---|---|
+  | primary (text-bearing surfaces) | `#E11D48` | `#C8143F` | Light text on `#E11D48` is 4.28:1; `#C8143F` gives 5.27:1. Same rose hue. |
+  | success | `#16A34A` | `#15803D` | 3.0:1 on its soft surface; now 4.57:1 |
+  | warning text | `#D97706` | `#B45309` | 4.57:1 |
+  | Primary-coloured text on the page bg | primary | primaryStrong `#831843` | Primary text on `#FFF1F2` is 4.28:1 |
+
+**Overlay (native)**
+- Fixed dark-rose glass (it floats over WhatsApp): toolbar and cards `#1C0A12`, hairline `#FDA4AF` @30%, 12 dp surfaces, 8 dp buttons, chips and rows, 4 dp badges, soft-rose `#FECDD3` icons, rose `#C8143F` active states. Old cyan/slate colours are gone.
+- The bubble is a mini app icon: the mascot (`drawable-nodpi/ic_convo_mascot.png`, cut out of `new-icon.png` by flood-filling the background) on a rose 12 dp square.
+- JetBrains Mono on every overlay TextView via `OverlayFonts` (`ResourcesCompat`, works below API 26). Glide menus use it too.
+
+**Rename + icon**
+- Display name **ConvoAI** (`app.json` → `app_name`), plus the notification, toasts, accessibility description (the config plugin now *updates* an existing string) and all user-facing copy.
+- Package ID unchanged (`com.indiccontext.assistant`), so updates install in place and permissions survive.
+- Icon: `assets/new-icon.png` → `icon` + splash (bg `#DC1E42`). The adaptive foreground (`assets/adaptive-icon.png`) is the icon at 80% so circular masks don't clip the mascot (`scripts/generateIcons.py`).
+
