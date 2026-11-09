@@ -32,6 +32,12 @@ export function parseDue(due: string): { dueAtMs: number; dueHasTime: boolean } 
   return { dueAtMs: date.getTime(), dueHasTime: h !== undefined };
 }
 
+/** A deadline that has already passed (date-only: the whole day is over). Never trust the AI on this. */
+export function isPast(x: { dueAtMs: number; dueHasTime: boolean }, now: Date): boolean {
+  const end = x.dueHasTime ? x.dueAtMs : x.dueAtMs + 24 * 60 * 60 * 1000 - 1;
+  return end <= now.getTime();
+}
+
 /** Stable identity of a chat message, used to analyse each message at most once. */
 export function messageKey(chat: string, b: ChatBubble): string {
   return [chat, b.isSelf ? 'u' : 'c', b.sentDate ?? '', b.sentTime ?? '', b.text.trim().slice(0, 140)].join('|');
@@ -69,7 +75,7 @@ export async function extractCommitments(
             confidence: asString(it.confidence) === 'high' ? 'high' : 'low',
           };
         })
-        .filter((x): x is ExtractedCommitment => x !== null);
+        .filter((x): x is ExtractedCommitment => x !== null && !isPast(x, now));
     },
     { temperature: 0.1, maxTokens: 500, thinking: 'low' },
   );

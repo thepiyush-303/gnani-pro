@@ -164,7 +164,7 @@ All Kotlin files are in `modules/indic-context/android/src/main/java/com/indicco
 | `ChatDates.kt` | Reads dates | Turns labels like "Yesterday" or "1 October 2026" into real dates. |
 | `OverlayService.kt` | Draws the UI | Draws the bubble and toolbar over WhatsApp. Handles drag, tap, and hold-and-glide. |
 | `GlideMenu.kt` | Pick-a-value menu | The popup list you reach by holding a button and sliding your finger. |
-| `OverlayFonts.kt` | Fonts | Applies the JetBrains Mono font to overlay text. |
+| `OverlayFonts.kt` | Fonts | Applies the Poppins font to overlay text. |
 | `VoiceRecorder.kt` | Records audio | Records the microphone to an `.m4a` file. |
 | `VoiceChangerController.kt` | Voice-note flow | Record → transcribe → re-speak → ready card → send. |
 | `VoicePreviewPlayer.kt` | Voice samples | Plays the short sample for each voice. |

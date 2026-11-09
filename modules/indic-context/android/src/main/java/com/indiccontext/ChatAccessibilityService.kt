@@ -588,7 +588,8 @@ class ChatAccessibilityService : AccessibilityService() {
      *
      * Date resolution (WhatsApp):
      *  1. `conversation_row_date_divider` inside a row starts a new day for that row and below.
-     *  2. No divider on screen + list scrolled to the bottom → the chat-list date of this chat.
+     *  2. No divider on screen + list scrolled to the bottom → the chat-list date of this chat,
+     *     or, failing that, the newest message's day if it was sent in the last 30 min.
      *  3. Otherwise SessionBuffer inherits from the message above when appending.
      *
      * @return number of buffer changes (added or updated messages).
@@ -703,6 +704,15 @@ class ChatAccessibilityService : AccessibilityService() {
                 Log.d(TAG, "dating visible messages from chat list: ${anchor.dayIso}")
                 return out.map { it.copy(sentDate = anchor.dayIso) }
             }
+            // No divider on screen ⇒ everything visible is one day. If the newest message was
+            // sent in the last 30 min, that day is known (the usual "just got a message" case).
+            val newest = out.maxByOrNull { it.top }
+            val recent = ChatDates.recentDay(newest?.sentTime, now)
+            if (recent != null) {
+                Log.d(TAG, "dating visible messages from the newest message's time: $recent")
+                return out.map { it.copy(sentDate = recent) }
+            }
+            Log.d(TAG, "no date divider / anchor on screen; messages left undated")
         }
         return out
     }

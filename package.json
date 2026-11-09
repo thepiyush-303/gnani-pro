@@ -16,7 +16,7 @@
     "eval:prompts": "npx -y tsx --env-file=.env scripts/evalPrompts.ts"
   },
   "dependencies": {
-    "@expo-google-fonts/jetbrains-mono": "^0.4.1",
+    "@expo-google-fonts/poppins": "^0.4.1",
     "expo": "~51.0.28",
     "expo-constants": "~16.0.2",
     "expo-dev-client": "~4.0.27",

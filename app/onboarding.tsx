@@ -146,7 +146,7 @@ export default function OnboardingScreen() {
     ? allGranted
       ? 'Turn on & finish'
       : 'Finish'
-    : step.kind === 'try' && demoTried === 0
+    : step.kind === 'try' && demoTried < DEMO_STEPS
       ? 'Skip demo'
       : step.kind === 'voice' && voice
         ? `Use ${voice}`
@@ -225,17 +225,9 @@ export default function OnboardingScreen() {
               <Text style={[font.label, { color: c.primaryStrong }]}>Try it</Text>
               <Text style={[font.title, { color: c.text, marginTop: space.xs }]}>Here’s how it works in a chat</Text>
               <Text style={[font.body, { color: c.textMuted, marginTop: space.sm, marginBottom: space.lg }]}>
-                This is a safe practice chat. Nothing is sent and no AI is used.
+                Follow the glowing light: it shows the next button to press. This is a safe practice chat, so nothing is sent and no AI is used.
               </Text>
               <ToolbarDemo onProgress={setDemoTried} />
-              {demoTried >= DEMO_STEPS && (
-                <Pop style={{ marginTop: space.lg }}>
-                  <View style={[styles.notice, { backgroundColor: c.successSoft, marginTop: 0 }]}>
-                    <MaterialCommunityIcons name="party-popper" size={20} color={c.success} />
-                    <Text style={[font.bodyStrong, { color: c.success, marginLeft: space.sm }]}>You’ve tried everything!</Text>
-                  </View>
-                </Pop>
-              )}
             </>
           )}
 

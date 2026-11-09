@@ -348,6 +348,15 @@ export async function claimMessages(keys: string[]): Promise<string[]> {
   return NativeModule.claimMessages(keys);
 }
 
+/** Writes a line to Android logcat (tag "ConvoAI.JS"); works in release builds, unlike console.log. */
+export function debugLog(message: string): void {
+  try {
+    NativeModule.debugLog(message);
+  } catch {
+    /* native module unavailable (tests / iOS) */
+  }
+}
+
 /** Releases claimed keys so those messages are analysed again (after a network failure). */
 export async function unclaimMessages(keys: string[]): Promise<void> {
   return NativeModule.unclaimMessages(keys);
@@ -524,6 +533,7 @@ const IndicContext = {
   stopVoicePreview,
   claimMessages,
   unclaimMessages,
+  debugLog,
   addReminder,
   listReminders,
   completeReminder,

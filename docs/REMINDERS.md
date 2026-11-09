@@ -14,6 +14,8 @@ ConvoAI spots things **you** owe in the chats you open and reminds you before th
 
 - **Automatic, filtered.** An on-phone regex (`deadlineCues.ts`) checks each new message for a time, day, date or deadline word (English, Hinglish, Devanagari). Only messages that match go to the AI, in **one call per batch**. Ordinary chat makes no AI calls. This is the one exception to "AI only on button taps", and it's switched off on Home under **Reminders → Detect deadlines in chats**.
 - **Each message is analysed at most once.** Its key (`chat|sender|sentDate|sentTime|text`) is *claimed* natively before the call (an LRU of 500 keys). If the call fails on a network, timeout or HTTP error, the keys are released so the next visit retries; a parse failure doesn't retry.
+- **Dating messages.** A message needs a known send day. It comes from WhatsApp's date divider ("Today"), from the chat list, or, when neither is on screen, from the newest message's time if it was sent in the last 30 minutes. With no divider on screen, every visible message is from the same day (`ChatDates.recentDay`, unit-tested). Before this third rule, a chat whose "Today" divider had scrolled off made the detector skip everything.
+- **No timers in the detector.** React Native pauses JS `setTimeout` while ConvoAI's own screen is in the background, which it always is while you're in WhatsApp. A debounce timer therefore never fired, and that was the first on-device bug. Each buffer update is processed at once instead: one check runs at a time, with the newest buffer queued. For the same reason, `llmClient`'s 429/503 retry wait is skipped in the background.
 - **Only recent messages.** A message must have a known `sentDate` within the last 2 days, so scrolling through old history doesn't create reminders.
 - **Kept:** `owed_by` user or both, and `confidence: high`. Low-confidence items are dropped.
 - **Saved straight away.** If a chat is open, a "⏰ Reminder set" card shows with **↩ Undo**, and for timed deadlines **Remind 1 hr before** / **10 min before**.
@@ -52,6 +54,21 @@ Bridge functions (`modules/indic-context/src/index.ts`):
 - reminder data: `claimMessages`, `unclaimMessages`, `addReminder`, `listReminders`, `completeReminder`, `deleteReminder`;
 - settings: `getReminderSettings`, `setReminderSettings`, `openExactAlarmSettings`;
 - events: `addRemindersChangedListener`.
+
+## Debugging on a phone
+
+The detector logs every step to logcat, including in release builds, via `IndicContext.debugLog` (tag `ConvoAI.JS`):
+
+```
+adb logcat -v time | grep -E "ConvoAI.JS|ReminderScheduler|ReminderReceiver|dating visible|left undated"
+```
+
+A healthy run looks like this:
+- `checking 1 message(s) in "…"`
+- `AI found 1 item(s): […]`
+- `ReminderScheduler: scheduled '…' at … (exact=true)`
+
+`skipped: send date unknown` means no date anchor was on screen. `already checked` means the message was analysed before.
 
 ## Testing
 

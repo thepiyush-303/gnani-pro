@@ -149,6 +149,9 @@ For each candidate that creates a REAL commitment with a date or time, return on
   - "user" if the user must do it: the contact asked the user ("Update me by 6 PM", "Send the file by Monday") or the user promised it ("I'll send the review by Monday").
   - "contact" if the contact promised to do something for the user.
   - "both" for a plan both take part in ("Let's meet at 5" that was agreed, "call at 7").
+  Decide "owed_by" by WHO MUST ACT, reading pronouns from the writer's side: a "contact" message saying "update me", "send me", "tell me", "mujhe bata", "merko bhej" asks the USER to act → "user". A "user" message saying "send me…" asks the contact → "contact".
+  "owed_by" must agree with "task": if the task is the user doing something (e.g. "Send update to Ayush"), "owed_by" is "user".
+  Judge each candidate on its own words; a request is still real even if the chat around it is casual or joking.
 - "task": a short reminder in English, imperative, max 60 characters, naming the person, e.g. "Send update to Mr. Sharma", "Review the deck for Ravi", "Meet Ravi at the cafe".
 - "due": the deadline as "yyyy-MM-ddTHH:mm" when a time is given, or "yyyy-MM-dd" when only a day is given ("by Monday", "kal tak").
   Resolve relative words against THAT message's "sent" day, not "now" ("kal" sent yesterday meaning tomorrow = today). "EOD" means 18:00 that day. "by 6" in a work chat during the day means 18:00.

@@ -1,7 +1,7 @@
 /**
  * ⏰ Deadline detection: turns chat messages into scheduled reminders.
  *
- *   buffer update → recent, dated messages with a deadline cue (on-phone regex)
+ *   buffer update (processed at once; no timers, see below) → recent, dated messages with a deadline cue (on-phone regex)
  *     → claimMessages (each message analysed at most once, ever)
  *     → ONE LLM call per batch (COMMITMENTS_SYSTEM_PROMPT)
  *     → keep owed_by user/both + confidence high
@@ -19,24 +19,27 @@ import { type ExtractedCommitment, extractCommitments, isoDay, messageKey } from
 export { extractCommitments, messageKey, parseDue } from './commitments';
 
 const TAG = '[Reminders]';
-const DEBOUNCE_MS = 3000;
+/** Logs to logcat (tag ConvoAI.JS) in every build, and to the Metro console in dev. */
+const log = (...parts: unknown[]) => {
+  const line = `${TAG} ${parts.map((p) => (typeof p === 'string' ? p : JSON.stringify(p))).join(' ')}`;
+  console.log(line);
+  IndicContext.debugLog(line);
+};
 /** Only messages sent today or in the last 2 days can create reminders. */
 const RECENT_DAYS = 2;
 
 // ─── Live pipeline (called from CopilotBridge on every buffer update) ────────
 
-let timer: ReturnType<typeof setTimeout> | null = null;
+// No setTimeout debounce: React Native pauses JS timers while ConvoAI's own screen is in the
+// background, which it always is while the user is in WhatsApp. Instead, one check runs at a
+// time and the newest buffer waits in `latest`; claimMessages stops repeat AI calls.
 let running = false;
 let latest: { buffer: ChatBubble[]; chat: string } | null = null;
 
 export function onBuffer(buffer: ChatBubble[], chat: string | null | undefined): void {
-  if (!chat) return;
+  if (!chat || buffer.length === 0) return;
   latest = { buffer, chat };
-  if (timer) clearTimeout(timer);
-  timer = setTimeout(() => {
-    timer = null;
-    void processLatest();
-  }, DEBOUNCE_MS);
+  void processLatest();
 }
 
 async function processLatest(): Promise<void> {
@@ -57,14 +60,21 @@ async function processLatest(): Promise<void> {
         b.sentDate >= oldest &&
         hasDeadlineCue(b.text),
     );
-    if (cued.length === 0) return;
+    if (cued.length === 0) {
+      const undated = buffer.filter((b) => !b.sentDate && (b.isSelf === true || b.isSelf === false) && hasDeadlineCue(b.text));
+      if (undated.length > 0) log(`${undated.length} deadline message(s) skipped: send date unknown`);
+      return;
+    }
 
     const keys = cued.map((b) => messageKey(chat, b));
     const fresh = new Set(await IndicContext.claimMessages(keys));
     const candidates = cued.filter((_, i) => fresh.has(keys[i]));
-    if (candidates.length === 0) return;
+    if (candidates.length === 0) {
+      log(`${cued.length} deadline message(s) in "${chat}" already checked`);
+      return;
+    }
 
-    console.log(`${TAG} checking ${candidates.length} message(s) in "${chat}"`);
+    log(`checking ${candidates.length} message(s) in "${chat}"`);
     let items: ExtractedCommitment[];
     try {
       items = await extractCommitments(buffer, chat, candidates, now);
@@ -75,8 +85,12 @@ async function processLatest(): Promise<void> {
       }
       throw e;
     }
+    log(`AI found ${items.length} item(s):`, items.map((x) => ({ owedBy: x.owedBy, conf: x.confidence, task: x.task, due: new Date(x.dueAtMs).toString().slice(0, 21), timed: x.dueHasTime })));
     for (const it of items) {
-      if (it.confidence !== 'high' || it.owedBy === 'contact') continue;
+      if (it.confidence !== 'high' || it.owedBy === 'contact') {
+        log(`ignored (${it.owedBy}, ${it.confidence}): ${it.task}`);
+        continue;
+      }
       const src = candidates[it.id];
       const saved = await IndicContext.addReminder({
         task: it.task,
@@ -86,10 +100,10 @@ async function processLatest(): Promise<void> {
         dueHasTime: it.dueHasTime,
         sourceKey: messageKey(chat, src),
       });
-      console.log(`${TAG} ${saved ? 'scheduled' : 'skipped (too late)'}: ${it.task}`);
+      log(`${saved ? 'scheduled' : 'skipped (too late)'}: ${it.task}`);
     }
   } catch (e) {
-    console.warn(`${TAG} detection failed:`, isLlmError(e) ? `${e.kind} ${e.message}` : e);
+    log('detection failed:', isLlmError(e) ? `${e.kind} ${e.message}` : String((e as Error)?.stack ?? e));
   } finally {
     running = false;
     if (latest) void processLatest(); // a newer buffer arrived meanwhile

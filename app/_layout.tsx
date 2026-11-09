@@ -4,21 +4,23 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
-// Per-weight imports: importing the package root would bundle all 16 variants (~1.4 MB extra).
-import { JetBrainsMono_300Light } from '@expo-google-fonts/jetbrains-mono/300Light';
-import { JetBrainsMono_400Regular } from '@expo-google-fonts/jetbrains-mono/400Regular';
-import { JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono/500Medium';
-import { JetBrainsMono_600SemiBold } from '@expo-google-fonts/jetbrains-mono/600SemiBold';
+// Per-weight imports: importing the package root would bundle all 18 variants.
+import { Poppins_300Light } from '@expo-google-fonts/poppins/300Light';
+import { Poppins_400Regular } from '@expo-google-fonts/poppins/400Regular';
+import { Poppins_500Medium } from '@expo-google-fonts/poppins/500Medium';
+import { Poppins_600SemiBold } from '@expo-google-fonts/poppins/600SemiBold';
+import { Poppins_700Bold } from '@expo-google-fonts/poppins/700Bold';
 import { CopilotBridgeProvider } from '../src/hooks/CopilotBridge';
 import { useTheme } from '../src/ui/theme';
 
 export default function RootLayout() {
   const { c, isDark } = useTheme();
   const [fontsLoaded, fontError] = useFonts({
-    JetBrainsMono_300Light,
-    JetBrainsMono_400Regular,
-    JetBrainsMono_500Medium,
-    JetBrainsMono_600SemiBold,
+    Poppins_300Light,
+    Poppins_400Regular,
+    Poppins_500Medium,
+    Poppins_600SemiBold,
+    Poppins_700Bold,
   });
   // DESIGN.md: respect reduced motion for screen transitions
   const [reduceMotion, setReduceMotion] = useState(false);
@@ -32,7 +34,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <CopilotBridgeProvider>
         <StatusBar style={isDark ? 'light' : 'dark'} backgroundColor={c.bg} />
-        {/* Wait for JetBrains Mono so text never flashes in the system font (fall back if loading fails). */}
+        {/* Wait for Poppins so text never flashes in the system font (fall back if loading fails). */}
         {fontsLoaded || fontError ? (
           <Stack
             screenOptions={{

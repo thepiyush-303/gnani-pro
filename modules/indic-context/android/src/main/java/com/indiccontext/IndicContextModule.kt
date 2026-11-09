@@ -281,6 +281,11 @@ class IndicContextModule : Module() {
             ReminderStore.claim(ctx, keys)
         }
 
+        /** JS → logcat ("ConvoAI.JS"), so release builds can be diagnosed with adb logcat. */
+        Function("debugLog") { message: String ->
+            android.util.Log.i("ConvoAI.JS", message.take(2000))
+        }
+
         AsyncFunction("unclaimMessages") { keys: List<String> ->
             ReminderStore.unclaim(ctx, keys)
         }

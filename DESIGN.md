@@ -25,10 +25,10 @@ colors:
 
 # ─── Typography ───────────────────────────────────────────
 typography:
-  family:        "JetBrains Mono, ui-monospace, monospace"
-  displayFamily: "JetBrains Mono, ui-monospace, monospace"
-  monoFamily:    "JetBrains Mono, ui-monospace, monospace"
-  source:        "Optional Google Font: https://fonts.google.com/specimen/JetBrains+Mono"
+  family:        "Poppins, system-ui, sans-serif"
+  displayFamily: "Poppins, system-ui, sans-serif"
+  monoFamily:    "ui-monospace, monospace"
+  source:        "Google Font: https://fonts.google.com/specimen/Poppins (covers Devanagari)"
   weights:       "300, 400, 500, 600"
   defaultWeight: 500
   tone:          "mono"
@@ -204,9 +204,9 @@ Use semantic tokens first. Raw values from frontmatter are source values, not pe
 - Do not finish with invisible text, hidden CTAs, empty hero areas, or decorative backgrounds replacing product content.
 
 ### Typography
-- Primary family: JetBrains Mono, ui-monospace, monospace.
-- Display family: JetBrains Mono, ui-monospace, monospace.
-- Monospace family: JetBrains Mono, ui-monospace, monospace.
+- Primary family: Poppins, system-ui, sans-serif (rounded geometric; changed from JetBrains Mono for a softer, modern look).
+- Display family: Poppins (700 for display, 600 for titles), slight negative tracking on large text.
+- Monospace family: ui-monospace, monospace (not used in the app).
 - Allowed weights: 300, 400, 500, 600.
 - Default UI weight: 500.
 - Keep heading levels semantic. Visual size must follow layout importance, not HTML heading number.

@@ -68,4 +68,16 @@ class ChatDatesTest {
         assertNull(ChatDates.normalizeTime("25:00"))
         assertNull(ChatDates.normalizeTime("meet at 10:30"))
     }
+
+    @Test fun recentDayOnlyForJustSentMessages() {
+        val n = now.timeInMillis // Tue 3 Nov 2026 15:00
+        assertEquals("2026-11-03", ChatDates.recentDay("14:45", n))
+        assertEquals("2026-11-03", ChatDates.recentDay("3:00 pm", n))
+        assertEquals("2026-11-03", ChatDates.recentDay("15:01", n)) // clock drift
+        assertNull(ChatDates.recentDay("14:00", n))  // an hour ago: could be any day
+        assertNull(ChatDates.recentDay("15:30", n))  // future → yesterday 15:30, too old
+        assertNull(ChatDates.recentDay(null, n))
+        val justAfterMidnight = Calendar.getInstance().apply { clear(); set(2026, Calendar.NOVEMBER, 4, 0, 10) }.timeInMillis
+        assertEquals("2026-11-03", ChatDates.recentDay("23:55", justAfterMidnight))
+    }
 }

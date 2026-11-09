@@ -115,4 +115,20 @@ object ChatDates {
     }
 
     fun todayIso(nowMs: Long = System.currentTimeMillis()): String = iso(startOfDay(nowMs))
+
+    /**
+     * Day of a message whose time ("HH:mm") is within the last [windowMinutes] of [nowMs],
+     * else null. Used when no date divider is on screen: the newest message of a chat you're
+     * reading right now was almost certainly just sent. Handles midnight ("23:55" at 00:10 → yesterday).
+     * A time up to 2 min ahead of the phone clock (clock drift) counts as now.
+     */
+    fun recentDay(timeHHmm: String?, nowMs: Long = System.currentTimeMillis(), windowMinutes: Int = 30): String? {
+        val t = normalizeTime(timeHHmm) ?: return null
+        val (h, m) = t.split(":").map { it.toInt() }
+        val cal = startOfDay(nowMs).apply { set(Calendar.HOUR_OF_DAY, h); set(Calendar.MINUTE, m) }
+        if (cal.timeInMillis > nowMs + 2 * 60_000L) cal.add(Calendar.DAY_OF_YEAR, -1)
+        val age = nowMs - cal.timeInMillis
+        if (age > windowMinutes * 60_000L) return null
+        return iso(startOfDay(cal.timeInMillis))
+    }
 }

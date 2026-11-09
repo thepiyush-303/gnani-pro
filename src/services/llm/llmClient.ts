@@ -230,7 +230,21 @@ async function postJson(
   }
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/**
+ * React Native pauses JS timers while ConvoAI's own screen is in the background (i.e. whenever
+ * the user is in WhatsApp), so a timer-based wait would never end there: retry at once instead.
+ */
+function appInBackground(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { AppState } = require('react-native');
+    return AppState.currentState !== 'active';
+  } catch {
+    return false; // Node (prompt eval): timers work normally
+  }
+}
+const sleep = (ms: number) =>
+  appInBackground() ? Promise.resolve() : new Promise((r) => setTimeout(r, ms));
 
 // ─── Gemini provider ─────────────────────────────────────────────────────────
 

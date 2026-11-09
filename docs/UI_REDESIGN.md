@@ -95,11 +95,11 @@ Translate details:
 ---
 
 ## Round 3 (2026-11-08): DESIGN.md system, rename to ConvoAI, new icon
-Source of truth: `DESIGN.md` (Rose · JetBrains Mono · Bento · radius 4/8/12 · spacing 4–48).
+Source of truth: `DESIGN.md` (Rose · Poppins · Bento · radius 4/8/12 · spacing 4–48).
 
 **App (`src/ui/theme.ts`, `src/ui/components.tsx`, `app/*.tsx`)**
 - Light palette = DESIGN.md tokens. Dark palette = the same rose hues re-balanced for dark surfaces (the theme still follows the system).
-- JetBrains Mono 300/400/500/600 via `@expo-google-fonts/jetbrains-mono`, loaded in `_layout.tsx` (blank screen until loaded, so there's no font flash). Default weight 500, letter spacing 0. Android needs one family per weight, so `font.*` tokens carry `fontFamily` (no `fontWeight` anywhere).
+- Poppins 300/400/500/600/700 via `@expo-google-fonts/poppins` (per-weight imports), loaded in `_layout.tsx` (blank screen until loaded, so there's no font flash). It replaced JetBrains Mono for a smoother, rounder look, and it also covers Devanagari. Body text is 400; display is 700 with −0.4 tracking; line heights are ~1.45× (Poppins has tall ascenders). Android needs one family per weight, so `font.*` tokens carry `fontFamily` (no `fontWeight` anywhere).
 - Radius: 4 chips and labels · 8 cards, buttons and icon tiles · 12 hero and feature surfaces.
 - **Bento Home** (all original sections kept):
   - hero module (mascot, ConvoAI, value line, status, on/off);
@@ -122,7 +122,7 @@ Source of truth: `DESIGN.md` (Rose · JetBrains Mono · Bento · radius 4/8/12 �
 **Overlay (native)**
 - Fixed dark-rose glass (it floats over WhatsApp): toolbar and cards `#1C0A12`, hairline `#FDA4AF` @30%, 12 dp surfaces, 8 dp buttons, chips and rows, 4 dp badges, soft-rose `#FECDD3` icons, rose `#C8143F` active states. Old cyan/slate colours are gone.
 - The bubble is a mini app icon: the mascot (`drawable-nodpi/ic_convo_mascot.png`, cut out of `new-icon.png` by flood-filling the background) on a rose 12 dp square.
-- JetBrains Mono on every overlay TextView via `OverlayFonts` (`ResourcesCompat`, works below API 26). Glide menus use it too.
+- Poppins (500 / 600) on every overlay TextView via `OverlayFonts` (`ResourcesCompat`, works below API 26). Glide menus use it too.
 
 **Rename + icon**
 - Display name **ConvoAI** (`app.json` → `app_name`), plus the notification, toasts, accessibility description (the config plugin now *updates* an existing string) and all user-facing copy.
