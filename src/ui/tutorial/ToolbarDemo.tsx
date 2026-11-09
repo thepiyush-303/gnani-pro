@@ -1,6 +1,7 @@
 /**
  * Interactive tutorial demo: a mock chat with the ConvoAI bubble.
  * Tap the bubble → toolbar slides out → try each button and see what it does.
+ * Plus a simulated incoming "by 6 baje" message that shows the automatic ⏰ reminder card.
  * Everything is simulated locally (no LLM / network calls).
  */
 
@@ -12,6 +13,7 @@ import { FadeIn, Pulse, useReducedMotion } from '../motion';
 import { font, motion, radius, space, useTheme } from '../theme';
 
 type ActionKey = 'improve' | 'translate' | 'voice' | 'replies' | 'dictate';
+type TryKey = ActionKey | 'reminder';
 
 const ACTIONS: { key: ActionKey; icon: IconName; label: string; explain: string }[] = [
   { key: 'improve', icon: 'creation', label: 'Improve', explain: '✨ Rewrites your draft in the chat’s own tone. Tap a suggestion to use it.' },
@@ -20,6 +22,13 @@ const ACTIONS: { key: ActionKey; icon: IconName; label: string; explain: string 
   { key: 'replies', icon: 'forum-outline', label: 'Smart replies', explain: '💬 Three replies that fit the conversation. Tap one to insert it.' },
   { key: 'dictate', icon: 'microphone-outline', label: 'Dictate', explain: '🎙 Speak and your words are typed into the message box.' },
 ];
+
+const REMINDER_EXPLAIN =
+  '⏰ No button needed: when a chat says you owe something by a time or day, ConvoAI sets a reminder (30 min before by default). Undo from the card.';
+const INCOMING = 'Shaam 6 baje tak address bhej dena 🙏';
+
+/** Everything the demo can teach: the 5 toolbar buttons + the automatic reminder. */
+export const DEMO_STEPS = ACTIONS.length + 1;
 
 const START_DRAFT = 'i can come tomorrow evening';
 
@@ -42,8 +51,9 @@ export function ToolbarDemo({ onProgress }: { onProgress?: (tried: number) => vo
   const [card, setCard] = useState<DemoCard | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [recording, setRecording] = useState<number | null>(null);
-  const [tried, setTried] = useState<ActionKey[]>([]);
-  const [last, setLast] = useState<ActionKey | null>(null);
+  const [tried, setTried] = useState<TryKey[]>([]);
+  const [last, setLast] = useState<TryKey | null>(null);
+  const [incoming, setIncoming] = useState(false);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const toolbarAnim = useRef(new Animated.Value(0)).current;
 
@@ -123,6 +133,26 @@ export function ToolbarDemo({ onProgress }: { onProgress?: (tried: number) => vo
     [reduced],
   );
 
+  const simulateIncoming = () => {
+    clearTimers();
+    setCard(null);
+    setNotice(null);
+    setRecording(null);
+    setIncoming(true);
+    setLast('reminder');
+    setTried((t) => (t.includes('reminder') ? t : [...t, 'reminder']));
+    later(
+      () =>
+        setCard({
+          title: '⏰ Reminder set',
+          subtitle: 'Send Ravi the address\nReminds 5:30 PM today · due 6:00 PM',
+          chips: ['↩ Undo', '⏰ Remind 1 hr before'],
+          onChip: 'notice',
+        }),
+      reduced ? 0 : 900,
+    );
+  };
+
   const tapOutside = () => {
     if (!open || recording !== null) return;
     clearTimers();
@@ -140,12 +170,15 @@ export function ToolbarDemo({ onProgress }: { onProgress?: (tried: number) => vo
     setDraft(START_DRAFT);
     setTried([]);
     setLast(null);
+    setIncoming(false);
   };
 
   const hint = !open
     ? 'Tap the bubble to open the toolbar'
     : last
-      ? ACTIONS.find((a) => a.key === last)!.explain
+      ? last === 'reminder'
+        ? REMINDER_EXPLAIN
+        : ACTIONS.find((a) => a.key === last)!.explain
       : 'Now tap any button to try it';
 
   return (
@@ -173,6 +206,23 @@ export function ToolbarDemo({ onProgress }: { onProgress?: (tried: number) => vo
           <View style={[styles.msgIn, { backgroundColor: c.surface }]}>
             <Text style={[font.small, { color: c.text }]}>Ankit bhi aa raha hai 😄</Text>
           </View>
+          {incoming ? (
+            <FadeIn from={8} duration={motion.normal} style={[styles.msgIn, { backgroundColor: c.surface }]}>
+              <Text style={[font.small, { color: c.text }]}>{INCOMING}</Text>
+            </FadeIn>
+          ) : (
+            <Pressable
+              onPress={simulateIncoming}
+              accessibilityRole="button"
+              accessibilityLabel="Simulate a new message from Ravi with a deadline"
+              style={[styles.simulate, { borderColor: c.borderStrong }]}
+            >
+              <MaterialCommunityIcons name="alarm" size={16} color={c.primaryStrong} />
+              <Text style={[font.smallStrong, { color: c.primaryStrong, marginLeft: space.xs }]}>
+                Simulate: Ravi asks for something “by 6”
+              </Text>
+            </Pressable>
+          )}
         </Pressable>
 
         {/* Card above the toolbar */}
@@ -188,7 +238,17 @@ export function ToolbarDemo({ onProgress }: { onProgress?: (tried: number) => vo
                     setDraft(chip);
                     flash('Inserted into the message box');
                   } else {
-                    flash(chip.startsWith('📤') ? 'Sent to Ravi (demo)' : chip.startsWith('▶') ? 'Playing preview (demo)' : 'Pick any of 6 voices');
+                    flash(
+                      chip.startsWith('📤')
+                        ? 'Sent to Ravi (demo)'
+                        : chip.startsWith('▶')
+                          ? 'Playing preview (demo)'
+                          : chip.startsWith('↩')
+                            ? 'Reminder removed (demo)'
+                            : chip.startsWith('⏰')
+                              ? 'Now reminds you at 5:00 PM (demo)'
+                              : 'Pick any of 6 voices',
+                    );
                   }
                   setCard(null);
                 }}
@@ -271,15 +331,15 @@ export function ToolbarDemo({ onProgress }: { onProgress?: (tried: number) => vo
       {/* Progress */}
       <View style={styles.progress}>
         <View style={{ flexDirection: 'row', gap: 6 }}>
-          {ACTIONS.map((a) => (
+          {[...ACTIONS.map((a) => a.key as TryKey), 'reminder' as TryKey].map((k) => (
             <View
-              key={a.key}
-              style={{ width: 18, height: 6, borderRadius: radius.sm, backgroundColor: tried.includes(a.key) ? c.primary : c.primarySoft }}
+              key={k}
+              style={{ width: 18, height: 6, borderRadius: radius.sm, backgroundColor: tried.includes(k) ? c.primary : c.primarySoft }}
             />
           ))}
         </View>
         <Text style={[font.small, { color: c.textMuted, flex: 1, marginLeft: space.md }]}>
-          Tried {tried.length} of {ACTIONS.length}
+          Tried {tried.length} of {DEMO_STEPS}
         </Text>
         <Pressable onPress={reset} hitSlop={8} accessibilityRole="button" accessibilityLabel="Replay demo">
           <Text style={[font.smallStrong, { color: c.primaryStrong }]}>↺ Replay</Text>
@@ -315,4 +375,15 @@ const styles = StyleSheet.create({
   doneDot: { position: 'absolute', top: 3, right: 3, width: 6, height: 6, borderRadius: 3 },
   input: { flexDirection: 'row', alignItems: 'center', margin: space.md, marginTop: 0, padding: space.md, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
   progress: { flexDirection: 'row', alignItems: 'center', marginTop: space.md },
+  simulate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    minHeight: 40,
+  },
 });

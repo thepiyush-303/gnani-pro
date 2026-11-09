@@ -69,6 +69,7 @@ class IndicContextModule : Module() {
             "onRecordingStateChanged",
             "onCopilotDisabled",
             "onActionTriggered",
+            "onRemindersChanged",
         )
 
         // ── Permissions ───────────────────────────────────────────
@@ -81,10 +82,14 @@ class IndicContextModule : Module() {
                 ctx, Manifest.permission.RECORD_AUDIO
             ) == PackageManager.PERMISSION_GRANTED
 
+            // Covers the Android 13+ runtime permission and notifications blocked in app settings
+            val notifOk = androidx.core.app.NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+
             mapOf(
                 "overlay"       to if (overlayOk) "granted" else "denied",
                 "accessibility" to if (a11yOk)    "granted" else "denied",
                 "microphone"    to if (micOk)     "granted" else "denied",
+                "notifications" to if (notifOk)   "granted" else "denied",
             )
         }
 
@@ -269,6 +274,75 @@ class IndicContextModule : Module() {
             Unit
         }
 
+        // ── ⏰ Deadline reminders ──────────────────────────────────
+
+        /** Returns the message keys never analysed before and marks them analysed (each message → AI at most once). */
+        AsyncFunction("claimMessages") { keys: List<String> ->
+            ReminderStore.claim(ctx, keys)
+        }
+
+        AsyncFunction("unclaimMessages") { keys: List<String> ->
+            ReminderStore.unclaim(ctx, keys)
+        }
+
+        /** Saves + schedules a reminder; shows the "⏰ Reminder set" card if a chat is open. Null if too late to remind. */
+        AsyncFunction("addReminder") { task: String, chat: String, appPackage: String, dueAtMs: Double, dueHasTime: Boolean, sourceKey: String ->
+            val r = ReminderStore.add(ctx, task, chat, appPackage, dueAtMs.toLong(), dueHasTime, sourceKey)
+                ?: return@AsyncFunction null
+            ReminderScheduler.schedule(ctx, r)
+            OverlayService.instance?.showReminderCard(r)
+            emitRemindersChanged()
+            r.toMap()
+        }
+
+        AsyncFunction("listReminders") {
+            ReminderStore.active(ctx).map { it.toMap() }
+        }
+
+        AsyncFunction("completeReminder") { id: String ->
+            ReminderStore.get(ctx, id)?.let { ReminderStore.update(ctx, it.copy(status = ReminderStore.STATUS_DONE)) }
+            ReminderScheduler.cancel(ctx, id)
+            emitRemindersChanged()
+            Unit
+        }
+
+        AsyncFunction("deleteReminder") { id: String ->
+            ReminderScheduler.cancel(ctx, id)
+            ReminderStore.remove(ctx, id)
+            emitRemindersChanged()
+            Unit
+        }
+
+        /** Android 12+ "Alarms & reminders" screen for this app (exact reminder times). */
+        AsyncFunction("openExactAlarmSettings") {
+            val intent = if (Build.VERSION.SDK_INT >= 31)
+                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, android.net.Uri.parse("package:${ctx.packageName}"))
+            else Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${ctx.packageName}"))
+            ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+
+        AsyncFunction("getReminderSettings") {
+            mapOf(
+                "autoDetect" to ReminderStore.autoDetect(ctx),
+                "leadMinutes" to ReminderStore.leadMinutes(ctx),
+                "exactAlarms" to ReminderScheduler.canExact(ctx),
+            )
+        }
+
+        /** Changing the lead time re-times active, not-yet-fired timed reminders. */
+        AsyncFunction("setReminderSettings") { autoDetect: Boolean, leadMinutes: Int ->
+            ReminderStore.setSettings(ctx, autoDetect, leadMinutes)
+            val now = System.currentTimeMillis()
+            ReminderStore.active(ctx).filter { it.dueHasTime && !it.notified }.forEach { r ->
+                val at = ReminderTimes.remindAt(r.dueAtMs, true, leadMinutes, now) ?: return@forEach
+                val updated = r.copy(remindAtMs = at)
+                ReminderStore.update(ctx, updated)
+                ReminderScheduler.schedule(ctx, updated)
+            }
+            emitRemindersChanged()
+            Unit
+        }
+
         AsyncFunction("isCopilotActive") {
             OverlayService.isCopilotActive && OverlayService.instance != null
         }
@@ -423,6 +497,14 @@ class IndicContextModule : Module() {
             sendEvent("onRecordingStateChanged", mapOf("isRecording" to isRecording))
         } catch (e: Exception) {
             android.util.Log.w("IndicContextModule", "emitRecordingStateChanged: ${e.message}")
+        }
+    }
+
+    fun emitRemindersChanged() {
+        try {
+            sendEvent("onRemindersChanged", mapOf("at" to System.currentTimeMillis().toDouble()))
+        } catch (e: Exception) {
+            android.util.Log.w("IndicContextModule", "emitRemindersChanged: ${e.message}")
         }
     }
 

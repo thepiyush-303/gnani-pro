@@ -1,7 +1,7 @@
 /**
  * Home: Bento layout (DESIGN.md).
  *   Hero (status + on/off) · setup checklist · language / voice tiles (+ pickers) ·
- *   current chat + catch-up summary · how-it-works feature tiles · footer.
+ *   current chat + catch-up summary · ⏰ reminders · how-it-works feature tiles · footer.
  * Toolbar actions themselves are handled app-wide by CopilotBridgeProvider.
  */
 
@@ -32,6 +32,7 @@ import {
   Tile,
 } from '../src/ui/components';
 import { VoicePicker } from '../src/ui/VoicePicker';
+import { RemindersSection } from '../src/ui/RemindersSection';
 
 const LANGUAGES: { code: string; label: string }[] = [
   { code: 'en-IN', label: 'English' },
@@ -52,6 +53,7 @@ const HOW_TO: { icon: IconName; title: string; body: string }[] = [
   { icon: 'forum-outline', title: 'Smart replies', body: 'Tap 💬 for three replies that fit the conversation.' },
   { icon: 'microphone-outline', title: 'Dictate', body: 'Tap 🎙 to speak; hold and glide to change language.' },
   { icon: 'account-voice', title: 'Voice notes', body: 'Tap 🗣 to record in another voice; hold and glide to pick it.' },
+  { icon: 'alarm', title: 'Reminders', body: 'Asked to reply “by 6 PM”? You’re reminded before it’s due.' },
 ];
 
 const llm = getLlmInfo();
@@ -61,8 +63,18 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { activeChat, bufferCount, copilotEnabled, setCopilotEnabled } = useCopilot();
-  const { perms, allGranted, grantedCount, openOverlaySettings, openAccessibilitySettings, openAppInfo, requestMicrophone } =
-    usePermissions();
+  const {
+    perms,
+    allGranted,
+    grantedCount,
+    totalCount,
+    setupComplete,
+    openOverlaySettings,
+    openAccessibilitySettings,
+    openAppInfo,
+    requestMicrophone,
+    requestNotifications,
+  } = usePermissions();
 
   const [language, setLanguage] = useState('en-IN');
   const [voices, setVoices] = useState<TimbreVoice[]>([]);
@@ -184,9 +196,9 @@ export default function HomeScreen() {
       </Card>
 
       {/* ── Setup checklist ── */}
-      {!allGranted && (
+      {!setupComplete && (
         <>
-          <SectionTitle right={<StatusPill label={`${grantedCount}/3 done`} tone="warning" />}>Finish setup</SectionTitle>
+          <SectionTitle right={<StatusPill label={`${grantedCount}/${totalCount} done`} tone="warning" />}>Finish setup</SectionTitle>
           <Card>
             <PermissionRow
               icon="layers-outline"
@@ -219,6 +231,14 @@ export default function HomeScreen() {
               description="For dictation and voice notes."
               status={perms.microphone}
               onGrant={requestMicrophone}
+            />
+            <View style={[styles.divider, { backgroundColor: c.border }]} />
+            <PermissionRow
+              icon="bell-outline"
+              title="Notifications"
+              description="For ⏰ reminders before something you owe is due. Optional."
+              status={perms.notifications}
+              onGrant={requestNotifications}
             />
           </Card>
         </>
@@ -330,6 +350,9 @@ export default function HomeScreen() {
         )}
       </Card>
 
+      {/* ── ⏰ Reminders ── */}
+      <RemindersSection notificationsOk={perms.notifications !== 'denied'} onGrantNotifications={requestNotifications} />
+
       {/* ── How it works: one lead feature + 2-column feature tiles ── */}
       <SectionTitle>How it works</SectionTitle>
       <Card variant="soft">
@@ -341,7 +364,7 @@ export default function HomeScreen() {
           </View>
         </View>
       </Card>
-      {[0, 2].map((start) => (
+      {Array.from({ length: Math.ceil(features.length / 2) }, (_, i) => i * 2).map((start) => (
         <View key={start} style={[styles.tileRow, { marginBottom: space.md }]}>
           {features.slice(start, start + 2).map((f, i) => (
             <React.Fragment key={f.title}>

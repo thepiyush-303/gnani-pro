@@ -1,5 +1,5 @@
 /**
- * Prompt regression check for Smart Replies & Improve Text.
+ * Prompt regression check for Smart Replies, Improve Text, Translate and ⏰ deadline extraction.
  *
  * Hits the real Gnani Evon endpoint with fixture conversations and fails on
  * the failure modes from docs/AI_OVERHAUL.md (generic check-ins, identical
@@ -13,6 +13,8 @@ import type { ChatBubble } from '../src/types/context';
 import { generateSmartReplies, improveText, translateText } from '../src/services/aiFeatures';
 import { buildChatPayload } from '../src/services/llm/chatPayload';
 import { isLlmError } from '../src/services/llm/llmClient';
+import { hasDeadlineCue } from '../src/services/reminders/deadlineCues';
+import { extractCommitments, parseDue, type ExtractedCommitment } from '../src/services/reminders/commitments';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -265,6 +267,85 @@ async function main() {
     console.log(`   → ${romanHi.translation}`);
     !romanHi.alreadyInTarget && DEV.test(romanHi.translation) ? pass('Hinglish converted to Devanagari') : fail('Hinglish treated as already Hindi');
     /5/.test(romanHi.translation) || /५/.test(romanHi.translation) ? pass('kept the time') : fail('dropped the time');
+  }
+
+  // 8. ⏰ Deadline reminders: on-phone cue filter (no network)
+  console.log('\n▶ Deadline cues (offline)');
+  const CUES: [string, boolean][] = [
+    ['Update me by 6:00 PM', true],
+    ["I'll provide the review by Monday", true],
+    ['kal tak bhej dunga', true],
+    ['मीटिंग 5 बजे है', true],
+    ['send it before EOD', true],
+    ['meet on 15 Nov?', true],
+    ['ok', false],
+    ['haha 😂', false],
+    ['how are you', false],
+    ['thanks bhai', false],
+  ];
+  for (const [text, want] of CUES) {
+    hasDeadlineCue(text) === want ? pass(`cue ${want ? '✓' : '✗'} "${text}"`) : fail(`cue wrong for "${text}" (want ${want})`);
+  }
+  const pd = parseDue('2026-11-09T18:00');
+  pd?.dueHasTime && new Date(pd.dueAtMs).getHours() === 18 ? pass('parseDue timed') : fail('parseDue timed');
+  parseDue('2026-11-09')?.dueHasTime === false ? pass('parseDue date-only') : fail('parseDue date-only');
+  parseDue('next monday') === null ? pass('parseDue rejects free text') : fail('parseDue accepted free text');
+
+  // 9. ⏰ Live extraction (now = Wed 4 Nov 2026, 14:00)
+  const NOW = at('2026-11-04T14:00:00');
+  const D = '2026-11-04';
+  const owed = (xs: ExtractedCommitment[]) => xs.filter((x) => x.confidence === 'high' && x.owedBy !== 'contact');
+  const dueIs = (x: ExtractedCommitment | undefined, iso: string, timed: boolean) => {
+    if (!x) return false;
+    const d = new Date(x.dueAtMs);
+    const s = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` +
+      (timed ? `T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '');
+    return x.dueHasTime === timed && s === iso;
+  };
+  const show = (xs: ExtractedCommitment[]) =>
+    xs.forEach((x) => console.log(`   [${x.kind} | ${x.owedBy} | ${x.confidence}] ${x.task} @ ${new Date(x.dueAtMs).toString().slice(0, 21)}${x.dueHasTime ? '' : ' (date only)'}`));
+
+  const bossAsk = [c('Hi, how is the client report going?', D, '13:40'), u('Almost done sir', D, '13:45'), c('Update me by 6:00 PM', D, '13:50')];
+  const r1 = await attempt('Reminders · boss "Update me by 6:00 PM"', () => extractCommitments(bossAsk, 'Mr. Sharma', [bossAsk[2]], NOW));
+  if (r1) {
+    show(r1);
+    dueIs(owed(r1)[0], `${D}T18:00`, true) ? pass('user owes it, today 18:00') : fail('expected a user task due today 18:00');
+  }
+
+  const review = [c('Can you review the pitch deck?', D, '12:55'), u("I'll provide the review by Monday", D, '13:00')];
+  const r2 = await attempt('Reminders · user "review by Monday"', () => extractCommitments(review, 'Ravi', [review[1]], NOW));
+  if (r2) {
+    show(r2);
+    dueIs(owed(r2)[0], '2026-11-09', false) ? pass('user owes it, Monday (date only)') : fail('expected a user task on Mon 2026-11-09, date only');
+  }
+
+  const meet = [c("let's meet at 5 at the cafe", D, '13:30'), u('done, see you there', D, '13:31')];
+  const r3 = await attempt('Reminders · agreed "meet at 5"', () => extractCommitments(meet, 'Ravi', [meet[0]], NOW));
+  if (r3) {
+    show(r3);
+    const x = owed(r3)[0];
+    dueIs(x, `${D}T17:00`, true) && x?.kind === 'event' ? pass('event both, today 17:00') : fail('expected an event today 17:00');
+  }
+
+  const theyOwe = [u('bhai details bhej de', D, '13:00'), c('kal tak bhej dunga pakka', D, '13:05'), u('ok', D, '13:06')];
+  const r4 = await attempt('Reminders · contact promise (ignored)', () => extractCommitments(theyOwe, 'Ravi', [theyOwe[1]], NOW));
+  if (r4) {
+    show(r4);
+    owed(r4).length === 0 ? pass('nothing the user owes') : fail('contact promise became a user reminder');
+  }
+
+  const alreadyDone = [c('update me by 6', D, '12:00'), u('Sent you the update just now', D, '13:40'), c('got it, thanks', D, '13:42')];
+  const r5 = await attempt('Reminders · done later (ignored)', () => extractCommitments(alreadyDone, 'Mr. Sharma', [alreadyDone[0]], NOW));
+  if (r5) {
+    show(r5);
+    owed(r5).length === 0 ? pass('already done → no reminder') : fail('reminder for something already done');
+  }
+
+  const pastDue = [c('send the invoice by 10 AM', D, '08:00')];
+  const r6 = await attempt('Reminders · deadline already past (ignored)', () => extractCommitments(pastDue, 'Accounts', [pastDue[0]], NOW));
+  if (r6) {
+    show(r6);
+    owed(r6).every((x) => x.dueAtMs > NOW.getTime()) ? pass('no past-due reminder') : fail('returned a past deadline');
   }
 
   // 7. Empty conversation short-circuits without a network call

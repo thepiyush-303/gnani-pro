@@ -563,6 +563,43 @@ class OverlayService : Service() {
         showCard(title, message, chips)
     }
 
+    /**
+     * "⏰ Reminder set" card after a deadline was detected in the open chat.
+     * Chips act natively: Undo deletes it; the lead-time chips re-time a timed reminder.
+     * Shown only while the bubble is on screen (i.e. the user is in a chat).
+     */
+    fun showReminderCard(r: ReminderStore.Reminder) {
+        if (overlayRootView == null) return
+        val ctx = applicationContext
+        val subtitle = "${r.task}\nReminds ${ReminderReceiver.time(ctx, r.remindAtMs)} ${ReminderReceiver.day(r.remindAtMs)} · ${ReminderReceiver.dueLabel(ctx, r)}"
+        fun retime(minutes: Int, label: String) = CardChip(label) {
+            val at = ReminderTimes.remindAt(r.dueAtMs, true, minutes, System.currentTimeMillis())
+            val current = ReminderStore.get(ctx, r.id)
+            if (at != null && current != null) {
+                val updated = current.copy(remindAtMs = at)
+                ReminderStore.update(ctx, updated)
+                ReminderScheduler.schedule(ctx, updated)
+                IndicContextModule.instance?.emitRemindersChanged()
+                Toast.makeText(ctx, "⏰ I'll remind you at ${ReminderReceiver.time(ctx, at)}", Toast.LENGTH_SHORT).show()
+            }
+            hideRecommendations()
+        }
+        val chips = mutableListOf(
+            CardChip("↩ Undo") {
+                ReminderScheduler.cancel(ctx, r.id)
+                ReminderStore.remove(ctx, r.id)
+                IndicContextModule.instance?.emitRemindersChanged()
+                Toast.makeText(ctx, "Reminder removed", Toast.LENGTH_SHORT).show()
+                hideRecommendations()
+            },
+        )
+        if (r.dueHasTime) {
+            chips += retime(60, "⏰ Remind 1 hr before")
+            chips += retime(10, "⏰ Remind 10 min before")
+        }
+        showCard("⏰ Reminder set", subtitle, chips)
+    }
+
     private fun bindCard(view: View, title: String, subtitle: String?, chips: List<CardChip>) {
         view.findViewById<TextView>(R.id.txt_recommendation_title)?.text = title
         view.findViewById<TextView>(R.id.txt_recommendation_subtitle)?.let { txtSub ->

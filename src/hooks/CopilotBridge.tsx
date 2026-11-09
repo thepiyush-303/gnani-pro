@@ -25,6 +25,7 @@ import {
 } from '../services/aiFeatures';
 import { describeLlmError, getGnaniSttKey, isLlmError } from '../services/llm/llmClient';
 import { getCleanFirstName } from '../utils/contactName';
+import { onBuffer as detectDeadlines } from '../services/reminders/commitmentDetector';
 
 /** "casual banter · close friends · Hinglish": what the LLM inferred about the chat. */
 export function describeInsight(r: { tone: string; relationship: string; language?: string }): string {
@@ -124,10 +125,12 @@ export function CopilotBridgeProvider({ children }: { children: React.ReactNode 
   }, []);
 
   useEffect(() => {
-    // Buffer updates only refresh what Home shows: no LLM calls here.
+    // Buffer updates refresh what Home shows. The only AI they can trigger is the filtered
+    // ⏰ deadline detector: on-phone cue check first, one call per batch of new cued messages.
     const bufferSub = IndicContext.addBufferListener(({ buffer, threadTitle }) => {
       setBufferCount(buffer.length);
       if (threadTitle) setActiveChat(threadTitle);
+      detectDeadlines(buffer as ChatBubble[], threadTitle);
     });
 
     // Dragging the bubble onto the bottom drop zone turns the copilot off natively.

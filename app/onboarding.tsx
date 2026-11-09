@@ -1,7 +1,7 @@
 /**
  * Tutorial: interactive and animated. Shown on first launch and from Home.
  *   1 Welcome · 2 Try it (interactive toolbar demo) · 3 Choose your voice ·
- *   4–6 Permissions (live status, animated) · 7 All set
+ *   4–7 Permissions (live status, animated; notifications optional) · 8 All set
  * Animations respect the system "Remove animations" setting (src/ui/motion.tsx).
  */
 
@@ -19,9 +19,10 @@ import { font, radius, space, useTheme } from '../src/ui/theme';
 import { AppMark, Card, IconBadge, type IconName, PrimaryButton, StepDots, Tile } from '../src/ui/components';
 import { FadeIn, Pop, Pulse } from '../src/ui/motion';
 import { VoicePicker } from '../src/ui/VoicePicker';
-import { ToolbarDemo } from '../src/ui/tutorial/ToolbarDemo';
+import { DEMO_STEPS, ToolbarDemo } from '../src/ui/tutorial/ToolbarDemo';
 
-type Perm = 'overlay' | 'accessibility' | 'microphone';
+type Perm = 'overlay' | 'accessibility' | 'microphone' | 'notifications';
+const PERM_ORDER: Perm[] = ['overlay', 'accessibility', 'microphone', 'notifications'];
 type Step = { kind: 'welcome' } | { kind: 'try' } | { kind: 'voice' } | { kind: 'permission'; perm: Perm } | { kind: 'done' };
 
 const STEPS: Step[] = [
@@ -31,6 +32,7 @@ const STEPS: Step[] = [
   { kind: 'permission', perm: 'overlay' },
   { kind: 'permission', perm: 'accessibility' },
   { kind: 'permission', perm: 'microphone' },
+  { kind: 'permission', perm: 'notifications' },
   { kind: 'done' },
 ];
 
@@ -39,6 +41,7 @@ const FEATURES: { icon: IconName; title: string; body: string }[] = [
   { icon: 'forum-outline', title: 'Smart replies', body: 'Three replies in the chat’s own language and tone, remembering what’s due today.' },
   { icon: 'microphone-outline', title: 'Dictate', body: 'Speak in 10 Indian languages, and the text lands in the message box.' },
   { icon: 'account-voice', title: 'Voice notes in another voice', body: 'Your words, spoken by one of 6 natural voices, sent to the chat.' },
+  { icon: 'alarm', title: 'Deadline reminders', body: 'Boss says “update me by 6 PM”? You get a reminder at 5:30.' },
 ];
 
 const PERMISSION_COPY: Record<Perm, { icon: IconName; title: string; why: string; steps: string[]; button: string }> = {
@@ -52,7 +55,7 @@ const PERMISSION_COPY: Record<Perm, { icon: IconName; title: string; why: string
   accessibility: {
     icon: 'gesture-tap',
     title: 'Accessibility',
-    why: 'Lets the assistant read the open chat (so suggestions fit the conversation) and put text into the message box. It only works inside WhatsApp and never stores chats.',
+    why: 'Lets the assistant read the open chat (so suggestions fit the conversation) and put text into the message box. It only works inside WhatsApp and never stores chats; only the ⏰ reminders it sets are saved on your phone.',
     steps: [
       'Tap “Open settings”, then Installed apps / Downloaded apps.',
       'Choose ConvoAI and turn it on.',
@@ -67,6 +70,13 @@ const PERMISSION_COPY: Record<Perm, { icon: IconName; title: string; why: string
     steps: ['Tap “Allow microphone”.', 'Choose “While using the app” / “Allow”.'],
     button: 'Allow microphone',
   },
+  notifications: {
+    icon: 'bell-outline',
+    title: 'Notifications',
+    why: 'Optional. When a chat says you need to do something by a time or day (“update me by 6 PM”, “I’ll send it by Monday”), ConvoAI reminds you before it’s due.',
+    steps: ['Tap “Allow notifications”.', 'Choose “Allow”.', 'Change how early you’re reminded, or turn detection off, under Reminders on Home.'],
+    button: 'Allow notifications',
+  },
 };
 
 const RECAP: { icon: IconName; text: string }[] = [
@@ -75,6 +85,7 @@ const RECAP: { icon: IconName; text: string }[] = [
   { icon: 'creation', text: '✨ Improve · 🌐 Translate · 💬 Smart replies: tap a suggestion to insert it.' },
   { icon: 'microphone-outline', text: '🎙 Tap to dictate. Hold and glide to change the language.' },
   { icon: 'account-voice', text: '🗣 Tap to record a voice note. Hold and glide to switch voices.' },
+  { icon: 'alarm', text: '⏰ Deadlines you owe are spotted in open chats and you’re reminded before they’re due. Undo from the card.' },
   { icon: 'gesture-swipe-down', text: 'Drag the bubble to the bottom of the screen to turn ConvoAI off.' },
 ];
 
@@ -83,8 +94,15 @@ export default function OnboardingScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { setCopilotEnabled } = useCopilot();
-  const { perms, allGranted, openOverlaySettings, openAccessibilitySettings, openAppInfo, requestMicrophone } =
-    usePermissions();
+  const {
+    perms,
+    allGranted,
+    openOverlaySettings,
+    openAccessibilitySettings,
+    openAppInfo,
+    requestMicrophone,
+    requestNotifications,
+  } = usePermissions();
   const [index, setIndex] = useState(0);
   const [demoTried, setDemoTried] = useState(0);
   const [voices, setVoices] = useState<TimbreVoice[]>([]);
@@ -116,7 +134,13 @@ export default function OnboardingScreen() {
   };
 
   const grant = (perm: Perm) =>
-    perm === 'overlay' ? openOverlaySettings() : perm === 'accessibility' ? openAccessibilitySettings() : requestMicrophone();
+    perm === 'overlay'
+      ? openOverlaySettings()
+      : perm === 'accessibility'
+        ? openAccessibilitySettings()
+        : perm === 'microphone'
+          ? requestMicrophone()
+          : requestNotifications();
 
   const nextLabel = isLast
     ? allGranted
@@ -204,7 +228,7 @@ export default function OnboardingScreen() {
                 This is a safe practice chat. Nothing is sent and no AI is used.
               </Text>
               <ToolbarDemo onProgress={setDemoTried} />
-              {demoTried >= 5 && (
+              {demoTried >= DEMO_STEPS && (
                 <Pop style={{ marginTop: space.lg }}>
                   <View style={[styles.notice, { backgroundColor: c.successSoft, marginTop: 0 }]}>
                     <MaterialCommunityIcons name="party-popper" size={20} color={c.success} />
@@ -231,7 +255,7 @@ export default function OnboardingScreen() {
             <PermissionStep
               copy={PERMISSION_COPY[step.perm]}
               status={perms[step.perm]}
-              stepNo={(['overlay', 'accessibility', 'microphone'] as Perm[]).indexOf(step.perm) + 1}
+              stepNo={PERM_ORDER.indexOf(step.perm) + 1}
               onGrant={() => grant(step.perm)}
               onAppInfo={step.perm === 'accessibility' ? openAppInfo : undefined}
             />
@@ -248,7 +272,7 @@ export default function OnboardingScreen() {
                     You’re all set
                   </Text>
                   <Text style={[font.body, { color: c.textMuted, marginTop: space.sm, textAlign: 'center' }]}>
-                    Nothing runs or uses AI until you tap a button.
+                    AI runs when you tap a button. The only automatic check is for deadlines, and only on messages that mention a time or day.
                   </Text>
                 </FadeIn>
               </View>
@@ -308,7 +332,7 @@ function PermissionStep({
   const granted = status === 'granted';
   return (
     <>
-      <Text style={[font.label, { color: c.primaryStrong }]}>Permission {stepNo} of 3</Text>
+      <Text style={[font.label, { color: c.primaryStrong }]}>Permission {stepNo} of {PERM_ORDER.length}</Text>
       <View style={[styles.row, { marginTop: space.md }]}>
         {/* Pulses while waiting; pops into a check once granted */}
         {granted ? (

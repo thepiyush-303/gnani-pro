@@ -136,6 +136,32 @@ RULES
 OUTPUT: only this JSON object, with no markdown and no extra text:
 {"translation": "<translated message>", "already_in_target": boolean}`;
 
+// ─── ⏰ Commitments (deadline reminders) ─────────────────────────────────────
+
+export const COMMITMENTS_SYSTEM_PROMPT = `You find deadlines and plans in a WhatsApp chat so the app can remind the user.
+
+${preamble(false)}
+- Also given: "candidates": [{"id": number, "sender": "user"|"contact", "text": string, "sent": string}]: the messages to check. Use "conversation" only as context.
+
+For each candidate that creates a REAL commitment with a date or time, return one item:
+- "kind": "task" (something must be done or sent) or "event" (a meeting, call or plan at a time).
+- "owed_by":
+  - "user" if the user must do it: the contact asked the user ("Update me by 6 PM", "Send the file by Monday") or the user promised it ("I'll send the review by Monday").
+  - "contact" if the contact promised to do something for the user.
+  - "both" for a plan both take part in ("Let's meet at 5" that was agreed, "call at 7").
+- "task": a short reminder in English, imperative, max 60 characters, naming the person, e.g. "Send update to Mr. Sharma", "Review the deck for Ravi", "Meet Ravi at the cafe".
+- "due": the deadline as "yyyy-MM-ddTHH:mm" when a time is given, or "yyyy-MM-dd" when only a day is given ("by Monday", "kal tak").
+  Resolve relative words against THAT message's "sent" day, not "now" ("kal" sent yesterday meaning tomorrow = today). "EOD" means 18:00 that day. "by 6" in a work chat during the day means 18:00.
+- "confidence": "high" only when the deadline and who owes it are clear.
+
+${TIME_RULES}
+
+Do NOT return items for: questions about availability without a decision, hypotheticals, jokes, plans that were cancelled, deadlines already past as of "now", or things a LATER message shows were already done ("sent!", "done", "ho gaya").
+
+OUTPUT: only this JSON object, with no markdown and no extra text:
+{"items": [{"id": number, "kind": "task"|"event", "owed_by": "user"|"contact"|"both", "task": "...", "due": "...", "confidence": "high"|"low"}]}
+Use {"items": []} when there are none.`;
+
 // ─── Tone Guard ──────────────────────────────────────────────────────────────
 
 export const TONE_GUARD_SYSTEM_PROMPT = `You check whether a draft message could come across badly to the person receiving it, in an Indian messaging context.

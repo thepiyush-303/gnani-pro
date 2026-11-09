@@ -33,6 +33,8 @@ export interface PermissionStatus {
   accessibility: 'granted' | 'denied' | 'unknown';
   /** RECORD_AUDIO runtime permission */
   microphone: 'granted' | 'denied' | 'unknown';
+  /** POST_NOTIFICATIONS (Android 13+; always granted below) — needed for ⏰ reminders */
+  notifications: 'granted' | 'denied' | 'unknown';
 }
 
 /**
@@ -315,6 +317,87 @@ export async function stopVoicePreview(): Promise<void> {
   return NativeModule.stopVoicePreview();
 }
 
+// ─── ⏰ Deadline reminders ─────────────────────────────────────────────────────
+
+export interface Reminder {
+  id: string;
+  /** Short imperative, e.g. "Send update to Mr. Sharma" */
+  task: string;
+  /** Chat title it came from */
+  chat: string;
+  appPackage: string;
+  dueAtMs: number;
+  /** false = date-only deadline ("by Monday") */
+  dueHasTime: boolean;
+  remindAtMs: number;
+  status: 'active' | 'done';
+  createdAtMs: number;
+  /** The notification already fired */
+  notified: boolean;
+}
+
+export interface ReminderSettings {
+  autoDetect: boolean;
+  leadMinutes: number;
+  /** Android allows exact alarms (otherwise reminders may arrive a few minutes late) */
+  exactAlarms: boolean;
+}
+
+/** Returns the keys never analysed before and marks them analysed, so each message reaches the AI at most once. */
+export async function claimMessages(keys: string[]): Promise<string[]> {
+  return NativeModule.claimMessages(keys);
+}
+
+/** Releases claimed keys so those messages are analysed again (after a network failure). */
+export async function unclaimMessages(keys: string[]): Promise<void> {
+  return NativeModule.unclaimMessages(keys);
+}
+
+/**
+ * Saves and schedules a reminder (lead time / 9 AM rule applied natively) and shows the
+ * "⏰ Reminder set" card if a chat is open. Resolves null when it's too late to remind.
+ */
+export async function addReminder(r: {
+  task: string;
+  chat: string;
+  appPackage: string;
+  dueAtMs: number;
+  dueHasTime: boolean;
+  sourceKey: string;
+}): Promise<Reminder | null> {
+  return NativeModule.addReminder(r.task, r.chat, r.appPackage, r.dueAtMs, r.dueHasTime, r.sourceKey);
+}
+
+export async function listReminders(): Promise<Reminder[]> {
+  return NativeModule.listReminders();
+}
+
+export async function completeReminder(id: string): Promise<void> {
+  return NativeModule.completeReminder(id);
+}
+
+export async function deleteReminder(id: string): Promise<void> {
+  return NativeModule.deleteReminder(id);
+}
+
+export async function getReminderSettings(): Promise<ReminderSettings> {
+  return NativeModule.getReminderSettings();
+}
+
+export async function setReminderSettings(autoDetect: boolean, leadMinutes: number): Promise<void> {
+  return NativeModule.setReminderSettings(autoDetect, leadMinutes);
+}
+
+/** Opens Android's "Alarms & reminders" setting so reminders fire at the exact minute. */
+export async function openExactAlarmSettings(): Promise<void> {
+  return NativeModule.openExactAlarmSettings();
+}
+
+/** Fires whenever reminders are added, completed, snoozed, removed or re-timed. */
+export function addRemindersChangedListener(listener: () => void) {
+  return emitter.addListener('onRemindersChanged', listener);
+}
+
 /**
  * Starts audio recording for voice-to-text.
  * Can be called from the dashboard or overlay.
@@ -439,6 +522,16 @@ const IndicContext = {
   setVoice,
   previewVoice,
   stopVoicePreview,
+  claimMessages,
+  unclaimMessages,
+  addReminder,
+  listReminders,
+  completeReminder,
+  deleteReminder,
+  getReminderSettings,
+  setReminderSettings,
+  addRemindersChangedListener,
+  openExactAlarmSettings,
   startVoiceRecording,
   stopVoiceRecording,
   isVoiceRecording,

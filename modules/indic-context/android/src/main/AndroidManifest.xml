@@ -4,8 +4,15 @@
   FileProvider lets the Voice Changer share generated voice notes (cache/voice_notes/)
   with WhatsApp via ACTION_SEND. A dedicated subclass avoids clashing with other
   modules that also declare androidx FileProvider.
+
+  Deadline reminders: POST_NOTIFICATIONS (Android 13+), exact alarms when the user
+  allows them (otherwise an inexact fallback), and re-scheduling after reboot/update.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <application>
         <provider
             android:name="com.indiccontext.IndicFileProvider"
@@ -16,5 +23,15 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/indic_share_paths" />
         </provider>
+
+        <receiver
+            android:name="com.indiccontext.ReminderReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

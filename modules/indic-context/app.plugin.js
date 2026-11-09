@@ -96,7 +96,7 @@ function withIndicContextStrings(expoConfig) {
     config.modResults = config.modResults || { resources: { string: [] } };
     const strings = config.modResults.resources.string || [];
     const text =
-      'ConvoAI captures visible chat text in supported messaging apps to provide contextual AI suggestions and smart replies. No data is stored on disk.';
+      'ConvoAI reads the visible chat text in supported messaging apps to provide contextual AI suggestions, smart replies and deadline reminders. Chats are never stored; only the reminders it sets are saved on your phone.';
     const existing = strings.find((s) => s.$.name === 'accessibility_service_description');
     if (existing) {
       existing._ = text; // keep the description in sync with the app name on every prebuild

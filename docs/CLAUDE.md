@@ -33,8 +33,8 @@ There are two kinds of Android build. Don't mix them up:
 
 1. **Expo/React Native app (`app/`): "ConvoAI"**. Styling follows **`DESIGN.md`** (Rose palette, JetBrains Mono, Bento layout, radius 4/8/12); tokens live in `src/ui/theme.ts` (light = DESIGN tokens, dark = derived rose palette, following the system via `expo-system-ui`). Use `font.*` tokens (they carry `fontFamily`), never `fontWeight`. AA-contrast deviations from raw DESIGN values are listed in `docs/UI_REDESIGN.md`.
    - `app/_layout.tsx`: Stack (headers hidden) wrapped in `CopilotBridgeProvider` (`src/hooks/CopilotBridge.tsx`), the **only** place native overlay events are handled. ✨/💬 work whichever screen is open.
-   - `app/index.tsx` (Home): status + on/off, permission checklist (`src/hooks/usePermissions.ts`), current chat + Catch-up summary, speech language + default voice (shared with the toolbar's glide menus via the bridge), how-to.
-   - `app/onboarding.tsx`: 7-step interactive, animated tutorial: welcome → **Try it** (`src/ui/tutorial/ToolbarDemo.tsx`, a local mock chat with the bubble and toolbar) → **Choose your voice** (`src/ui/VoicePicker.tsx`, ▶ samples via `previewVoice`) → 3 permissions (live status, Android 13+ "Allow restricted settings") → all set. Shown on first launch (`src/services/onboardingStore.ts`) and from Home. Motion helpers: `src/ui/motion.tsx` (respects reduced motion).
+   - `app/index.tsx` (Home): status + on/off, permission checklist (`src/hooks/usePermissions.ts`; `allGranted` = the 3 required, `setupComplete` includes notifications), current chat + Catch-up summary, ⏰ Reminders (`src/ui/RemindersSection.tsx`), speech language + default voice (shared with the toolbar's glide menus via the bridge), how-to.
+   - `app/onboarding.tsx`: 8-step interactive, animated tutorial: welcome → **Try it** (`src/ui/tutorial/ToolbarDemo.tsx`, a local mock chat with the bubble and toolbar, plus a simulated "by 6 baje" message showing the ⏰ card) → **Choose your voice** (`src/ui/VoicePicker.tsx`, ▶ samples via `previewVoice`) → 4 permissions (live status, Android 13+ "Allow restricted settings"; Notifications is optional) → all set. Shown on first launch (`src/services/onboardingStore.ts`) and from Home. Motion helpers: `src/ui/motion.tsx` (respects reduced motion).
    - Shared UI: `src/ui/components.tsx` (`Card` standard/feature/hero/soft, `Tile`, `Chip`, `PrimaryButton`, …). Icon: `assets/new-icon.png` (source) → `python3 scripts/generateIcons.py` (adaptive foreground) → `npx expo prebuild --platform android --no-install`.
    - The overlay uses the same palette in fixed dark-rose glass; fonts via `OverlayFonts.kt`; bubble mascot `res/drawable-nodpi/ic_convo_mascot.png`.
 
@@ -51,6 +51,7 @@ There are two kinds of Android build. Don't mix them up:
    - **GlideMenu.kt**: hold-and-glide picker in its own overlay window (🎙️ languages, 🗣️ voices).
    - **WhatsAppAutoSender.kt**: selects the open chat in WhatsApp's share picker and taps send (guarded; see `docs/VOICE_CHANGER.md`).
    - **VoiceRecorder.kt**: Manages audio recording using Android's MediaRecorder.
+   - **Reminder*.kt** (`ReminderStore`, `ReminderTimes`, `ReminderScheduler`, `ReminderReceiver`): ⏰ deadline reminders: saved reminders, remind-time rules (unit-tested), AlarmManager (exact when allowed), notification with Done / Snooze, re-arm on boot. See `docs/REMINDERS.md`.
    - **IndicContextModule.kt**: Kotlin module bridging native functionality to JavaScript via Expo's native module system.
      - Exposes async functions for permissions, Gnani config, overlay control, voice recording, buffer access, and text injection.
      - Uses event emitters to send buffer updates, focus/blur events, and transcription results to JS.
@@ -98,8 +99,8 @@ There are two kinds of Android build. Don't mix them up:
 
 4. **AI Features**:
    - `CopilotBridgeProvider` handles `onActionTriggered`. It builds the payload from `getSessionBuffer()` and the active thread title, calls `src/services/aiFeatures.ts`, and shows the results with `IndicContext.showSmartReplies()`. On failure it calls `showAiError(..., retryAction)` instead.
-   - **LLM calls happen only on ✨ / 💬 taps** (plus Catch-up summary on Home). Incoming messages and reopening a chat never trigger one.
-   - Prompt regression check: `npm run eval:prompts`. It calls the configured provider live and makes ~11 calls, so mind the Gemini free-tier rate limit.
+   - **LLM calls happen only on ✨ / 💬 / 🌐 taps** (plus Catch-up summary on Home), with one filtered exception: **⏰ deadline detection** (`src/services/reminders/`). A buffer update runs the on-phone `hasDeadlineCue` regex; only new (claimed-once), recent, cued messages go to one `COMMITMENTS_SYSTEM_PROMPT` call; it can be switched off on Home. Reminders are the only thing written to disk (`ReminderStore`, SharedPreferences `convoai_reminders`). See `docs/REMINDERS.md`.
+   - Prompt regression check: `npm run eval:prompts`. It calls the configured provider live and makes ~17 calls (including 6 ⏰ extraction fixtures), so mind the Gemini free-tier rate limit.
 
 ### Key Files to Understand
 
