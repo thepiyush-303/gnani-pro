@@ -15,7 +15,7 @@ Write better, in every language, in every chat.
 ![Gnani AI](https://img.shields.io/badge/Speech-Gnani%20Prisma%20%2B%20Timbre-15803D)
 ![Gemini](https://img.shields.io/badge/LLM-Gemini%203.5%20Flash%20Lite-8E75B2?logo=googlegemini&logoColor=white)
 
-[Features](#-features) · [How it works](#-how-it-works) · [Tech stack](#-tech-stack) · [Getting started](#-getting-started) · [Contributing](#-contributing)
+[Features](#-features) · [How it works](#-how-it-works) · [Tech stack](#-tech-stack) · [Getting started](#-getting-started) · [Contributing](#-contributing) · [Download](#download--installation)
 
 </div>
 
