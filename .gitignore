@@ -46,3 +46,7 @@ expo-env.d.ts
 # My Skills: begin
 DESIGN.md
 # My Skills: end
+
+# Showcase deck: screen recordings stay out of git
+demo/public/videos/*.mp4
+demo/dist/

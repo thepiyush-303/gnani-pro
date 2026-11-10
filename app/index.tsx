@@ -6,7 +6,15 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -48,12 +56,36 @@ const LANGUAGES: { code: string; label: string }[] = [
 ];
 
 const HOW_TO: { icon: IconName; title: string; body: string }[] = [
-  { icon: 'creation', title: 'Improve', body: 'Type a draft, then tap ✨ to rewrite it in the chat’s own tone.' },
-  { icon: 'translate', title: 'Translate', body: 'Tap 🌐 to turn your draft into English or Hindi; hold and glide to choose.' },
-  { icon: 'forum-outline', title: 'Smart replies', body: 'Tap 💬 for three replies that fit the conversation.' },
-  { icon: 'microphone-outline', title: 'Dictate', body: 'Tap 🎙 to speak; hold and glide to change language.' },
-  { icon: 'account-voice', title: 'Voice notes', body: 'Tap 🗣 to record in another voice; hold and glide to pick it.' },
-  { icon: 'alarm', title: 'Reminders', body: 'Asked to reply “by 6 PM”? You’re reminded before it’s due.' },
+  {
+    icon: 'creation',
+    title: 'Improve',
+    body: 'Type a draft, then tap ✨ to rewrite it in the chat’s own tone.',
+  },
+  {
+    icon: 'translate',
+    title: 'Translate',
+    body: 'Tap 🌐 to turn your draft into English or Hindi; hold and glide to choose.',
+  },
+  {
+    icon: 'forum-outline',
+    title: 'Smart replies',
+    body: 'Tap 💬 for three replies that fit the conversation.',
+  },
+  {
+    icon: 'microphone-outline',
+    title: 'Dictate',
+    body: 'Tap 🎙 to speak; hold and glide to change language.',
+  },
+  {
+    icon: 'account-voice',
+    title: 'Voice notes',
+    body: 'Tap 🗣 to record in another voice; hold and glide to pick it.',
+  },
+  {
+    icon: 'alarm',
+    title: 'Reminders',
+    body: 'Asked to reply “by 6 PM”? You’re reminded before it’s due.',
+  },
 ];
 
 const llm = getLlmInfo();
@@ -62,7 +94,8 @@ export default function HomeScreen() {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { activeChat, bufferCount, copilotEnabled, setCopilotEnabled } = useCopilot();
+  const { activeChat, bufferCount, copilotEnabled, setCopilotEnabled } =
+    useCopilot();
   const {
     perms,
     allGranted,
@@ -82,7 +115,9 @@ export default function HomeScreen() {
   const [summary, setSummary] = useState<ThreadSummaryResult | null>(null);
   const [summarizing, setSummarizing] = useState(false);
   /** Which settings tile is expanded into its full picker. */
-  const [openPicker, setOpenPicker] = useState<'language' | 'voice' | null>(null);
+  const [openPicker, setOpenPicker] = useState<'language' | 'voice' | null>(
+    null,
+  );
 
   // First launch → tutorial
   useEffect(() => {
@@ -92,15 +127,24 @@ export default function HomeScreen() {
   }, [router]);
 
   useEffect(() => {
-    IndicContext.getLanguage().then(setLanguage).catch(() => {});
-    IndicContext.getVoices().then(setVoices).catch(() => {});
-    IndicContext.getVoice().then(setVoice).catch(() => {});
+    IndicContext.getLanguage()
+      .then(setLanguage)
+      .catch(() => {});
+    IndicContext.getVoices()
+      .then(setVoices)
+      .catch(() => {});
+    IndicContext.getVoice()
+      .then(setVoice)
+      .catch(() => {});
   }, []);
 
   const toggleCopilot = useCallback(
     async (on: boolean) => {
       if (on && !allGranted) {
-        Alert.alert('Finish setup first', 'Grant the permissions in “Finish setup” to turn ConvoAI on.');
+        Alert.alert(
+          'Finish setup first',
+          'Grant the permissions in “Finish setup” to turn ConvoAI on.',
+        );
         return;
       }
       try {
@@ -139,14 +183,19 @@ export default function HomeScreen() {
     : copilotEnabled
       ? 'Active in WhatsApp chats'
       : 'Paused';
-  const languageLabel = LANGUAGES.find((l) => l.code === language)?.label ?? 'English';
+  const languageLabel =
+    LANGUAGES.find((l) => l.code === language)?.label ?? 'English';
   const voiceInfo = voices.find((v) => v.id === voice);
   const [lead, ...features] = HOW_TO;
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: c.bg }}
-      contentContainerStyle={{ padding: space.lg, paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xxl }}
+      contentContainerStyle={{
+        padding: space.lg,
+        paddingTop: insets.top + space.lg,
+        paddingBottom: insets.bottom + space.xxl,
+      }}
     >
       {/* ── Hero module: brand, value, status and the one primary action (on/off) ── */}
       <Card variant="hero">
@@ -154,7 +203,9 @@ export default function HomeScreen() {
           <AppMark size={48} />
           <View style={{ flex: 1, marginLeft: space.md }}>
             <Text style={[font.title, { color: c.onPrimary }]}>ConvoAI</Text>
-            <Text style={[font.small, { color: c.onPrimaryMuted }]}>Your assistant inside WhatsApp</Text>
+            <Text style={[font.small, { color: c.onPrimaryMuted }]}>
+              Your assistant inside WhatsApp
+            </Text>
           </View>
           <Pressable
             onPress={() => router.push('/onboarding')}
@@ -163,14 +214,22 @@ export default function HomeScreen() {
             accessibilityLabel="How to use ConvoAI"
             style={styles.heroHelp}
           >
-            <MaterialCommunityIcons name="help-circle-outline" size={24} color={c.onPrimary} />
+            <MaterialCommunityIcons
+              name="help-circle-outline"
+              size={24}
+              color={c.onPrimary}
+            />
           </Pressable>
         </View>
 
-        <Text style={[font.display, { color: c.onPrimary, marginTop: space.xl }]}>
+        <Text
+          style={[font.display, { color: c.onPrimary, marginTop: space.xl }]}
+        >
           Write better in every chat.
         </Text>
-        <Text style={[font.body, { color: c.onPrimaryMuted, marginTop: space.sm }]}>
+        <Text
+          style={[font.body, { color: c.onPrimaryMuted, marginTop: space.sm }]}
+        >
           {copilotEnabled
             ? 'Open any WhatsApp chat: the bubble sits above the message box. Tap it for the toolbar; it closes when you touch anything else.'
             : allGranted
@@ -181,7 +240,12 @@ export default function HomeScreen() {
         <View style={[styles.heroFooter, { borderTopColor: '#FFFFFF33' }]}>
           <StatusPill label={status} tone="onHero" />
           <View style={styles.row}>
-            <Text style={[font.smallStrong, { color: c.onPrimary, marginRight: space.sm }]}>
+            <Text
+              style={[
+                font.smallStrong,
+                { color: c.onPrimary, marginRight: space.sm },
+              ]}
+            >
               {copilotEnabled ? 'On' : 'Off'}
             </Text>
             <Switch
@@ -198,7 +262,16 @@ export default function HomeScreen() {
       {/* ── Setup checklist ── */}
       {!setupComplete && (
         <>
-          <SectionTitle right={<StatusPill label={`${grantedCount}/${totalCount} done`} tone="warning" />}>Finish setup</SectionTitle>
+          <SectionTitle
+            right={
+              <StatusPill
+                label={`${grantedCount}/${totalCount} done`}
+                tone="warning"
+              />
+            }
+          >
+            Finish setup
+          </SectionTitle>
           <Card>
             <PermissionRow
               icon="layers-outline"
@@ -217,7 +290,10 @@ export default function HomeScreen() {
               hint={
                 <Text style={[font.small, { color: c.textFaint }]}>
                   Switch greyed out (“Restricted setting”)?{' '}
-                  <Text style={[font.smallStrong, { color: c.primaryStrong }]} onPress={openAppInfo}>
+                  <Text
+                    style={[font.smallStrong, { color: c.primaryStrong }]}
+                    onPress={openAppInfo}
+                  >
                     Open App info
                   </Text>{' '}
                   → ⋮ → Allow restricted settings, then come back.
@@ -248,13 +324,27 @@ export default function HomeScreen() {
       <SectionTitle>Your settings</SectionTitle>
       <View style={styles.tileRow}>
         <Tile
-          onPress={() => setOpenPicker(openPicker === 'language' ? null : 'language')}
+          onPress={() =>
+            setOpenPicker(openPicker === 'language' ? null : 'language')
+          }
           selected={openPicker === 'language'}
           accessibilityLabel={`Speech language: ${languageLabel}. Tap to change.`}
         >
-          <IconBadge icon="microphone-outline" color={c.primaryStrong} bg={c.primarySoft} size={32} />
-          <Text style={[font.label, { color: c.textFaint, marginTop: space.md }]}>Speech language</Text>
-          <Text style={[font.heading, { color: c.text, marginTop: space.xs }]} numberOfLines={1}>
+          <IconBadge
+            icon="microphone-outline"
+            color={c.primaryStrong}
+            bg={c.primarySoft}
+            size={32}
+          />
+          <Text
+            style={[font.label, { color: c.textFaint, marginTop: space.md }]}
+          >
+            Speech language
+          </Text>
+          <Text
+            style={[font.heading, { color: c.text, marginTop: space.xs }]}
+            numberOfLines={1}
+          >
             {languageLabel}
           </Text>
         </Tile>
@@ -264,23 +354,48 @@ export default function HomeScreen() {
           selected={openPicker === 'voice'}
           accessibilityLabel={`Voice for voice notes: ${voice ?? 'not set'}. Tap to change.`}
         >
-          <IconBadge icon="account-voice" color={c.primaryStrong} bg={c.primarySoft} size={32} />
-          <Text style={[font.label, { color: c.textFaint, marginTop: space.md }]}>Voice notes</Text>
-          <Text style={[font.heading, { color: c.text, marginTop: space.xs }]} numberOfLines={1}>
+          <IconBadge
+            icon="account-voice"
+            color={c.primaryStrong}
+            bg={c.primarySoft}
+            size={32}
+          />
+          <Text
+            style={[font.label, { color: c.textFaint, marginTop: space.md }]}
+          >
+            Voice notes
+          </Text>
+          <Text
+            style={[font.heading, { color: c.text, marginTop: space.xs }]}
+            numberOfLines={1}
+          >
             {voice ?? '…'}
-            {voiceInfo ? <Text style={[font.small, { color: c.textMuted }]}> {voiceInfo.gender === 'male' ? '♂' : '♀'}</Text> : null}
+            {voiceInfo ? (
+              <Text style={[font.small, { color: c.textMuted }]}>
+                {' '}
+                {voiceInfo.gender === 'male' ? '♂' : '♀'}
+              </Text>
+            ) : null}
           </Text>
         </Tile>
       </View>
 
       {openPicker === 'language' && (
         <Card style={{ marginTop: space.md }}>
-          <Text style={[font.small, { color: c.textMuted, marginBottom: space.md }]}>
-            Used by 🎙 dictation and 🗣 voice notes. You can also hold 🎙 in the toolbar and glide to switch.
+          <Text
+            style={[font.small, { color: c.textMuted, marginBottom: space.md }]}
+          >
+            Used by 🎙 dictation and 🗣 voice notes. You can also hold 🎙 in the
+            toolbar and glide to switch.
           </Text>
           <View style={styles.wrap} accessibilityRole="radiogroup">
             {LANGUAGES.map((l) => (
-              <Chip key={l.code} label={l.label} selected={language === l.code} onPress={() => pickLanguage(l.code)} />
+              <Chip
+                key={l.code}
+                label={l.label}
+                selected={language === l.code}
+                onPress={() => pickLanguage(l.code)}
+              />
             ))}
           </View>
         </Card>
@@ -288,7 +403,9 @@ export default function HomeScreen() {
 
       {openPicker === 'voice' && (
         <Card style={{ marginTop: space.md }}>
-          <Text style={[font.small, { color: c.textMuted, marginBottom: space.md }]}>
+          <Text
+            style={[font.small, { color: c.textMuted, marginBottom: space.md }]}
+          >
             The voice 🗣 voice notes are spoken in. Tap ▶ to hear a sample.
           </Text>
           <VoicePicker voices={voices} selected={voice} onSelect={pickVoice} />
@@ -303,10 +420,15 @@ export default function HomeScreen() {
             <View style={styles.row}>
               <IconBadge icon="whatsapp" color={c.success} bg={c.successSoft} />
               <View style={{ flex: 1, marginLeft: space.md }}>
-                <Text style={[font.heading, { color: c.text }]} numberOfLines={1}>
+                <Text
+                  style={[font.heading, { color: c.text }]}
+                  numberOfLines={1}
+                >
                   {activeChat}
                 </Text>
-                <Text style={[font.small, { color: c.textMuted }]}>{bufferCount} recent messages read</Text>
+                <Text style={[font.small, { color: c.textMuted }]}>
+                  {bufferCount} recent messages read
+                </Text>
               </View>
             </View>
             <PrimaryButton
@@ -320,20 +442,52 @@ export default function HomeScreen() {
             />
             {summary && (
               <View style={[styles.summary, { backgroundColor: c.surfaceAlt }]}>
-                <Text style={[font.body, { color: c.text }]}>{summary.brief}</Text>
+                <Text style={[font.body, { color: c.text }]}>
+                  {summary.brief}
+                </Text>
                 {summary.directAsks.length > 0 && (
                   <>
-                    <Text style={[font.label, { color: c.textFaint, marginTop: space.md }]}>They asked you</Text>
+                    <Text
+                      style={[
+                        font.label,
+                        { color: c.textFaint, marginTop: space.md },
+                      ]}
+                    >
+                      They asked you
+                    </Text>
                     {summary.directAsks.map((a, i) => (
-                      <Text key={i} style={[font.small, { color: c.textMuted, marginTop: space.xs }]}>• {a}</Text>
+                      <Text
+                        key={i}
+                        style={[
+                          font.small,
+                          { color: c.textMuted, marginTop: space.xs },
+                        ]}
+                      >
+                        • {a}
+                      </Text>
                     ))}
                   </>
                 )}
                 {summary.actionItems.length > 0 && (
                   <>
-                    <Text style={[font.label, { color: c.textFaint, marginTop: space.md }]}>Pending</Text>
+                    <Text
+                      style={[
+                        font.label,
+                        { color: c.textFaint, marginTop: space.md },
+                      ]}
+                    >
+                      Pending
+                    </Text>
                     {summary.actionItems.map((a, i) => (
-                      <Text key={i} style={[font.small, { color: c.textMuted, marginTop: space.xs }]}>• {a}</Text>
+                      <Text
+                        key={i}
+                        style={[
+                          font.small,
+                          { color: c.textMuted, marginTop: space.xs },
+                        ]}
+                      >
+                        • {a}
+                      </Text>
                     ))}
                   </>
                 )}
@@ -342,46 +496,103 @@ export default function HomeScreen() {
           </>
         ) : (
           <View style={styles.row}>
-            <IconBadge icon="chat-outline" color={c.textMuted} bg={c.surfaceAlt} />
-            <Text style={[font.small, { color: c.textMuted, flex: 1, marginLeft: space.md }]}>
-              Open a WhatsApp chat with ConvoAI on, and it’ll show up here for a catch-up summary.
+            <IconBadge
+              icon="chat-outline"
+              color={c.textMuted}
+              bg={c.surfaceAlt}
+            />
+            <Text
+              style={[
+                font.small,
+                { color: c.textMuted, flex: 1, marginLeft: space.md },
+              ]}
+            >
+              Open a WhatsApp chat with ConvoAI on, and it’ll show up here for a
+              catch-up summary.
             </Text>
           </View>
         )}
       </Card>
 
       {/* ── ⏰ Reminders ── */}
-      <RemindersSection notificationsOk={perms.notifications !== 'denied'} onGrantNotifications={requestNotifications} />
+      <RemindersSection
+        notificationsOk={perms.notifications !== 'denied'}
+        onGrantNotifications={requestNotifications}
+      />
 
       {/* ── How it works: one lead feature + 2-column feature tiles ── */}
       <SectionTitle>How it works</SectionTitle>
       <Card variant="soft">
         <View style={styles.row}>
-          <IconBadge icon={lead.icon} color={c.onPrimary} bg={c.primary} size={44} />
+          <IconBadge
+            icon={lead.icon}
+            color={c.onPrimary}
+            bg={c.primary}
+            size={44}
+          />
           <View style={{ flex: 1, marginLeft: space.md }}>
-            <Text style={[font.heading, { color: c.primaryStrong }]}>{lead.title}</Text>
-            <Text style={[font.small, { color: c.primaryStrong, marginTop: 2 }]}>{lead.body}</Text>
+            <Text style={[font.heading, { color: c.primaryStrong }]}>
+              {lead.title}
+            </Text>
+            <Text
+              style={[font.small, { color: c.primaryStrong, marginTop: 2 }]}
+            >
+              {lead.body}
+            </Text>
           </View>
         </View>
       </Card>
-      {Array.from({ length: Math.ceil(features.length / 2) }, (_, i) => i * 2).map((start) => (
+      {Array.from(
+        { length: Math.ceil(features.length / 2) },
+        (_, i) => i * 2,
+      ).map((start) => (
         <View key={start} style={[styles.tileRow, { marginBottom: space.md }]}>
           {features.slice(start, start + 2).map((f, i) => (
             <React.Fragment key={f.title}>
               {i > 0 && <View style={{ width: space.md }} />}
               <Tile>
-                <IconBadge icon={f.icon} color={c.primaryStrong} bg={c.primarySoft} size={32} />
-                <Text style={[font.bodyStrong, { color: c.text, marginTop: space.md }]}>{f.title}</Text>
-                <Text style={[font.small, { color: c.textMuted, marginTop: space.xs }]}>{f.body}</Text>
+                <IconBadge
+                  icon={f.icon}
+                  color={c.primaryStrong}
+                  bg={c.primarySoft}
+                  size={32}
+                />
+                <Text
+                  style={[
+                    font.bodyStrong,
+                    { color: c.text, marginTop: space.md },
+                  ]}
+                >
+                  {f.title}
+                </Text>
+                <Text
+                  style={[
+                    font.small,
+                    { color: c.textMuted, marginTop: space.xs },
+                  ]}
+                >
+                  {f.body}
+                </Text>
               </Tile>
             </React.Fragment>
           ))}
         </View>
       ))}
-      <PrimaryButton title="Open the tutorial" icon="school-outline" variant="ghost" onPress={() => router.push('/onboarding')} />
+      <PrimaryButton
+        title="Open the tutorial"
+        icon="school-outline"
+        variant="ghost"
+        onPress={() => router.push('/onboarding')}
+      />
 
-      <Text style={[font.small, { color: c.textFaint, textAlign: 'center', marginTop: space.xl }]}>
-        Speech by Gnani Prisma & Timbre · AI by {llm.provider === 'gemini' ? 'Gemini' : 'Evon'} ({llm.model})
+      <Text
+        style={[
+          font.small,
+          { color: c.textFaint, textAlign: 'center', marginTop: space.xl },
+        ]}
+      >
+        Speech by Gnani Prisma & Timbre · AI by{' '}
+        {llm.provider === 'gemini' ? 'Gemini' : 'Evon'}
       </Text>
     </ScrollView>
   );
@@ -389,7 +600,12 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },
-  heroHelp: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  heroHelp: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   heroFooter: {
     flexDirection: 'row',
     alignItems: 'center',
