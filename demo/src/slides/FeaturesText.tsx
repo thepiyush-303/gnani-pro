@@ -15,13 +15,24 @@ import {
 import type { SlideProps } from '../deck/types';
 import { FeatureLayout } from '../components/FeatureLayout';
 import { InfoCard, Reveal } from '../components/Cards';
-import { ChatBubble, GlideMenu, OverlayCard, OverlayToolbar } from '../components/Chat';
+import {
+  ChatBubble,
+  GlideMenu,
+  OverlayCard,
+  OverlayToolbar,
+} from '../components/Chat';
 import { MorphText, Typewriter } from '../components/Effects';
 import { Icon } from '../components/Icon';
 import { c, ov } from '../theme';
 
 /** 2 × 2 card grid; card i appears at step i. */
-export function Grid({ step, children }: { step: number; children: ReactNode[] }) {
+export function Grid({
+  step,
+  children,
+}: {
+  step: number;
+  children: ReactNode[];
+}) {
   return (
     <div
       style={{
@@ -34,7 +45,11 @@ export function Grid({ step, children }: { step: number; children: ReactNode[] }
     >
       {children.map((ch, i) => (
         <div key={i} style={{ minHeight: 0 }}>
-          <Reveal show={step >= i} from={i % 2 ? 'right' : 'left'} style={{ height: '100%' }}>
+          <Reveal
+            show={step >= i}
+            from={i % 2 ? 'right' : 'left'}
+            style={{ height: '100%' }}
+          >
             {ch}
           </Reveal>
         </div>
@@ -46,9 +61,25 @@ export function Grid({ step, children }: { step: number; children: ReactNode[] }
 const fill: CSSProperties = { height: '100%' };
 const body: CSSProperties = { fontSize: 21, lineHeight: 1.5 };
 
-export function Point({ icon, children, color = c.primary }: { icon: string; children: ReactNode; color?: string }) {
+export function Point({
+  icon,
+  children,
+  color = c.primary,
+}: {
+  icon: string;
+  children: ReactNode;
+  color?: string;
+}) {
   return (
-    <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginTop: 10, ...body }}>
+    <div
+      style={{
+        display: 'flex',
+        gap: 12,
+        alignItems: 'flex-start',
+        marginTop: 10,
+        ...body,
+      }}
+    >
       <span style={{ marginTop: 3, flex: 'none' }}>
         <Icon path={icon} size={24} color={color} />
       </span>
@@ -79,9 +110,17 @@ export function BubbleSlide({ step }: SlideProps) {
       <Grid step={step}>
         <InfoCard title="ONLY IN CHATS" badge="Accessibility" style={fill}>
           <div style={body}>
-            It appears when a chat room is open and hides on the chat list, Status, Calls, search and every other app.
+            It appears when a chat room is open and hides on the chat list,
+            Status, Calls, search and every other app.
           </div>
-          <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 10,
+              marginTop: 16,
+              flexWrap: 'wrap',
+            }}
+          >
             {['Chat ✓', 'Chat list ✗', 'Status ✗', 'Other apps ✗'].map((t) => (
               <span
                 key={t}
@@ -100,16 +139,31 @@ export function BubbleSlide({ step }: SlideProps) {
           </div>
         </InfoCard>
         <InfoCard title="REMEMBERS ITS SPOT" badge="Drag & drop" style={fill}>
-          <Point icon={mdiDragVariant}>Drag it to either edge; it stays at that height next time.</Point>
-          <Point icon={mdiCheckCircle}>Lifts above the keyboard only when the keyboard would cover it.</Point>
+          <Point icon={mdiDragVariant}>
+            Drag it to either edge; it stays at that height next time.
+          </Point>
+          <Point icon={mdiCheckCircle}>
+            Lifts above the keyboard only when the keyboard would cover it.
+          </Point>
         </InfoCard>
-        <InfoCard title="ONE TAP, ALL THE TOOLS" variant="glass" badge="Overlay" style={fill}>
-          <div style={{ ...body, color: ov.muted, marginBottom: 18 }}>✨ Improve · 🌐 Translate · 🗣 Voice note · 💬 Replies · 🎙 Dictate</div>
+        <InfoCard
+          title="ONE TAP, ALL THE TOOLS"
+          variant="glass"
+          badge="Overlay"
+          style={fill}
+        >
+          <div style={{ ...body, color: ov.muted, marginBottom: 18 }}>
+            ✨ Improve · 🌐 Translate · 🗣 Voice note · 💬 Replies · 🎙 Dictate
+          </div>
           <OverlayToolbar active="improve" />
         </InfoCard>
         <InfoCard title="OUT OF YOUR WAY" badge="Gestures" style={fill}>
-          <Point icon={mdiGestureTap}>Touch anywhere else and the toolbar folds back into the bubble.</Point>
-          <Point icon={mdiGestureSwipeDown}>Drag the bubble to the bottom of the screen to turn ConvoAI off.</Point>
+          <Point icon={mdiGestureTap}>
+            Touch anywhere else and the toolbar folds back into the bubble.
+          </Point>
+          <Point icon={mdiGestureSwipeDown}>
+            Drag the bubble to the bottom of the screen to turn ConvoAI off.
+          </Point>
         </InfoCard>
       </Grid>
     </FeatureLayout>
@@ -152,20 +206,54 @@ export function ImproveSlide({ step }: SlideProps) {
           >
             <Typewriter text={DRAFT} />
           </div>
-          <div style={{ ...body, color: c.textMuted, marginTop: 16 }}>Lowercase, no punctuation, no idea who it’s for. Tap ✨.</div>
+          <div style={{ ...body, color: c.textMuted, marginTop: 16 }}>
+            Lowercase, no punctuation, no idea who it’s for. Tap ✨.
+          </div>
         </InfoCard>
 
-        <InfoCard title="WHO IT’S FOR" badge="inferred, no presets" style={fill}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <div style={{ padding: 12, borderRadius: 14, background: '#EFEAE2' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: c.primary, marginBottom: 6 }}>Ravi</div>
+        <InfoCard
+          title="WHO IT’S FOR"
+          badge="inferred, no presets"
+          style={fill}
+        >
+          <div
+            style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}
+          >
+            <div
+              style={{ padding: 12, borderRadius: 14, background: '#EFEAE2' }}
+            >
+              <div
+                style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: c.primary,
+                  marginBottom: 6,
+                }}
+              >
+                Ravi
+              </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <ChatBubble from="them" style={{ fontSize: 15 }}>Kal ka plan pakka?</ChatBubble>
-                <ChatBubble from="them" style={{ fontSize: 15 }} delay={0.1}>Ankit bhi aa raha hai 😄</ChatBubble>
+                <ChatBubble from="them" style={{ fontSize: 15 }}>
+                  Kal ka plan pakka?
+                </ChatBubble>
+                <ChatBubble from="them" style={{ fontSize: 15 }} delay={0.1}>
+                  Ankit bhi aa raha hai 😄
+                </ChatBubble>
               </div>
             </div>
-            <div style={{ padding: 12, borderRadius: 14, background: '#EFEAE2' }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: c.primary, marginBottom: 6 }}>Mr. Sharma</div>
+            <div
+              style={{ padding: 12, borderRadius: 14, background: '#EFEAE2' }}
+            >
+              <div
+                style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: c.primary,
+                  marginBottom: 6,
+                }}
+              >
+                Mr. Sharma
+              </div>
               <ChatBubble from="them" style={{ fontSize: 15 }} delay={0.2}>
                 Are you free for a quick review call tomorrow?
               </ChatBubble>
@@ -173,18 +261,53 @@ export function ImproveSlide({ step }: SlideProps) {
           </div>
         </InfoCard>
 
-        <InfoCard title="REWRITE" variant="glass" badge="Gemini 3.5 Flash Lite" style={fill}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: ov.accent, letterSpacing: 1 }}>FOR RAVI · casual Hinglish</div>
-          <div style={{ fontSize: 23, margin: '6px 0 14px', color: ov.text }}>
-            <Typewriter text="Kal shaam aa jaunga, pakka! 🙌" delay={300} caret={false} />
+        <InfoCard
+          title="REWRITE"
+          variant="glass"
+          badge="Evon v3.3/Gemini 3.5 Flash Lite"
+          style={fill}
+        >
+          <div
+            style={{
+              fontSize: 15,
+              fontWeight: 700,
+              color: ov.accent,
+              letterSpacing: 1,
+            }}
+          >
+            FOR RAVI · casual Hinglish
           </div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: ov.accent, letterSpacing: 1 }}>FOR MR. SHARMA · polite English</div>
+          <div style={{ fontSize: 23, margin: '6px 0 14px', color: ov.text }}>
+            <Typewriter
+              text="Kal shaam aa jaunga, pakka! 🙌"
+              delay={300}
+              caret={false}
+            />
+          </div>
+          <div
+            style={{
+              fontSize: 15,
+              fontWeight: 700,
+              color: ov.accent,
+              letterSpacing: 1,
+            }}
+          >
+            FOR MR. SHARMA · polite English
+          </div>
           <div style={{ fontSize: 23, marginTop: 6, color: ov.text }}>
-            <Typewriter text="I can join tomorrow evening. Would that work for you?" delay={1500} caret={false} />
+            <Typewriter
+              text="I can join tomorrow evening. Would that work for you?"
+              delay={1500}
+              caret={false}
+            />
           </div>
         </InfoCard>
 
-        <InfoCard title="CHECKED, THEN YOURS" badge="before you see it" style={fill}>
+        <InfoCard
+          title="CHECKED, THEN YOURS"
+          badge="before you see it"
+          style={fill}
+        >
           {[
             'Keeps your meaning and your day (“tomorrow”)',
             'Never invents times, names or plans',
@@ -205,7 +328,17 @@ export function ImproveSlide({ step }: SlideProps) {
 
 function DayDivider({ label }: { label: string }) {
   return (
-    <div style={{ alignSelf: 'center', padding: '3px 12px', borderRadius: 8, background: '#FFFFFFE0', fontSize: 13, color: '#54656F', fontWeight: 600 }}>
+    <div
+      style={{
+        alignSelf: 'center',
+        padding: '3px 12px',
+        borderRadius: 8,
+        background: '#FFFFFFE0',
+        fontSize: 13,
+        color: '#54656F',
+        fontWeight: 600,
+      }}
+    >
       {label}
     </div>
   );
@@ -229,17 +362,38 @@ export function RepliesSlide({ step }: SlideProps) {
     >
       <Grid step={step}>
         <InfoCard title="THE CHAT" badge="with Ravi" style={fill}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: 12, borderRadius: 14, background: '#EFEAE2' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 7,
+              padding: 12,
+              borderRadius: 14,
+              background: '#EFEAE2',
+            }}
+          >
             <DayDivider label="Yesterday" />
-            <ChatBubble from="me" time="18:05" style={{ fontSize: 15 }}>bhai project ki details bhej de</ChatBubble>
-            <ChatBubble from="them" time="18:20" style={{ fontSize: 15 }} delay={0.1}>
+            <ChatBubble from="me" time="18:05" style={{ fontSize: 15 }}>
+              bhai project ki details bhej de
+            </ChatBubble>
+            <ChatBubble
+              from="them"
+              time="18:20"
+              style={{ fontSize: 15 }}
+              delay={0.1}
+            >
               abhi bahar hu, kal subah tak bhej dunga pakka
             </ChatBubble>
             <DayDivider label="Today · 10:30, nothing yet" />
           </div>
         </InfoCard>
 
-        <InfoCard title="WHAT THE AI SEES" badge="role-tagged + dated" variant="soft" style={fill}>
+        <InfoCard
+          title="WHAT THE AI SEES"
+          badge="role-tagged + dated"
+          variant="soft"
+          style={fill}
+        >
           <pre
             style={{
               fontFamily: 'Poppins, monospace',
@@ -258,16 +412,36 @@ since_last_message: "16 hours"`}
           </pre>
         </InfoCard>
 
-        <InfoCard title="THE INSIGHT" variant="glass" badge="Gemini 3.5 Flash Lite" style={fill}>
+        <InfoCard
+          title="THE INSIGHT"
+          variant="glass"
+          badge="Evon v3.3/Gemini 3.5 Flash Lite"
+          style={fill}
+        >
           <div style={{ fontSize: 23, lineHeight: 1.5, color: ov.text }}>
-            Ravi promised the details <b style={{ color: ov.accent }}>“by this morning”</b>. It’s 10:30 and nothing came.
+            Ravi promised the details{' '}
+            <b style={{ color: ov.accent }}>“by this morning”</b>. It’s 10:30
+            and nothing came.
           </div>
-          <div style={{ fontSize: 23, lineHeight: 1.5, color: ov.text, marginTop: 10 }}>→ suggest a friendly nudge, in Hinglish.</div>
+          <div
+            style={{
+              fontSize: 23,
+              lineHeight: 1.5,
+              color: ov.text,
+              marginTop: 10,
+            }}
+          >
+            → suggest a friendly nudge, in Hinglish.
+          </div>
         </InfoCard>
 
         <OverlayCard
           title="⏰ Follow up with Ravi"
-          chips={['Bhai details ka kya hua? Subah tak bhejne wala tha 😅', 'Ravi, details bhej de jab free ho', 'Koi na, aaj shaam tak bhi chalega 👍']}
+          chips={[
+            'Bhai details ka kya hua? Subah tak bhejne wala tha 😅',
+            'Ravi, details bhej de jab free ho',
+            'Koi na, aaj shaam tak bhi chalega 👍',
+          ]}
           highlight={0}
         />
       </Grid>
@@ -298,21 +472,63 @@ export function TranslateSlide({ step }: SlideProps) {
     >
       <Grid step={step}>
         <InfoCard title="YOUR DRAFT" style={fill}>
-          <div style={{ marginTop: 8, padding: '18px 22px', borderRadius: 16, background: '#FFFFFF', border: '1.5px solid #9F123926', fontSize: 24, color: '#111B21' }}>
+          <div
+            style={{
+              marginTop: 8,
+              padding: '18px 22px',
+              borderRadius: 16,
+              background: '#FFFFFF',
+              border: '1.5px solid #9F123926',
+              fontSize: 24,
+              color: '#111B21',
+            }}
+          >
             {EN}
           </div>
-          <div style={{ ...body, color: c.textMuted, marginTop: 14 }}>Casual English to a friend.</div>
+          <div style={{ ...body, color: c.textMuted, marginTop: 14 }}>
+            Casual English to a friend.
+          </div>
         </InfoCard>
 
-        <div style={{ ...fill, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 28 }}>
-          <GlideMenu title="TRANSLATE TO" items={['English', 'हिन्दी']} selected={step >= 1 ? 1 : 0} />
-          <div style={{ ...body, color: c.textMuted, maxWidth: 230 }}>Hold the button, slide your finger, let go. The choice is remembered.</div>
+        <div
+          style={{
+            ...fill,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 28,
+          }}
+        >
+          <GlideMenu
+            title="TRANSLATE TO"
+            items={['English', 'हिन्दी']}
+            selected={step >= 1 ? 1 : 0}
+          />
+          <div style={{ ...body, color: c.textMuted, maxWidth: 230 }}>
+            Hold the button, slide your finger, let go. The choice is
+            remembered.
+          </div>
         </div>
 
-        <InfoCard title="TRANSLATION" variant="glass" badge="Gemini 3.5 Flash Lite" style={fill}>
-          <MorphText texts={[EN, HI]} index={step >= 2 ? 1 : 0} style={{ fontSize: 28, lineHeight: 1.5, color: ov.text, minHeight: 90 }} />
+        <InfoCard
+          title="TRANSLATION"
+          variant="glass"
+          badge="Evon v3.3/Gemini 3.5 Flash Lite"
+          style={fill}
+        >
+          <MorphText
+            texts={[EN, HI]}
+            index={step >= 2 ? 1 : 0}
+            style={{
+              fontSize: 28,
+              lineHeight: 1.5,
+              color: ov.text,
+              minHeight: 90,
+            }}
+          />
           <div style={{ fontSize: 17, color: ov.muted, marginTop: 14 }}>
-            Roman Hinglish converts too: “kal milte hai” → “कल मिलते हैं”. Casual stays casual (no sudden आप).
+            Roman Hinglish converts too: “kal milte hai” → “कल मिलते हैं”.
+            Casual stays casual (no sudden आप).
           </div>
         </InfoCard>
 
@@ -320,14 +536,36 @@ export function TranslateSlide({ step }: SlideProps) {
           <motion.div
             initial={{ scale: 0.95 }}
             animate={{ scale: 1 }}
-            style={{ marginTop: 8, padding: '16px 20px', borderRadius: 28, background: '#FFFFFF', border: '1.5px solid #9F123926', fontSize: 23, color: '#111B21' }}
+            style={{
+              marginTop: 8,
+              padding: '16px 20px',
+              borderRadius: 28,
+              background: '#FFFFFF',
+              border: '1.5px solid #9F123926',
+              fontSize: 23,
+              color: '#111B21',
+            }}
           >
             {HI}
           </motion.div>
-          <div style={{ marginTop: 12, display: 'inline-block', padding: '8px 16px', borderRadius: 12, background: ov.bar, color: ov.text, fontSize: 17 }}>
+          <div
+            style={{
+              marginTop: 12,
+              display: 'inline-block',
+              padding: '8px 16px',
+              borderRadius: 12,
+              background: ov.bar,
+              color: ov.text,
+              fontSize: 17,
+            }}
+          >
             🌐 Translated to Hindi
           </div>
-          <div style={{ ...body, fontSize: 18, color: c.textMuted, marginTop: 12 }}>Empty or one-word draft? No AI call, just a hint.</div>
+          <div
+            style={{ ...body, fontSize: 18, color: c.textMuted, marginTop: 12 }}
+          >
+            Empty or one-word draft? No AI call, just a hint.
+          </div>
         </InfoCard>
       </Grid>
     </FeatureLayout>
