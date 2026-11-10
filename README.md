@@ -42,17 +42,17 @@ Speech runs on **Gnani AI** (Prisma speech-to-text and Timbre text-to-speech). T
 
 ## ✨ Features
 
-| | Feature | What it does |
-|---|---|---|
-| 🫧 | **Smart bubble** | Appears **only inside a WhatsApp chat**, just above the message box. It hides everywhere else (chat list, Status, other apps). Drag it to either edge and it remembers the spot. The toolbar closes on any outside touch, and dragging the bubble to the bottom turns ConvoAI off. |
-| ✨ | **Improve** | Rewrites your draft to fit the conversation: casual Hinglish with a friend, polite English with your boss. The tone is **inferred from the chat**, never from a contact name or preset. Checks keep your meaning, script and day (“tomorrow”). |
-| 💬 | **Smart replies** | Three replies in the chat's own language and tone. Every message carries its **send date**, so ConvoAI knows that yesterday's “kal subah tak bhej dunga” is overdue this morning and suggests a nudge. |
-| 🌐 | **Translate** | Hold 🌐 and glide to **English** or **हिन्दी**, then tap. Your draft is replaced with the translation in the right script (Roman Hinglish → Devanagari), in the same tone. Empty or one-word drafts never make an AI call. |
-| 🎙 | **Dictate** | Speak in any of **10 Indian languages**, and **Gnani Prisma** types it into the message box. Hold and glide to switch language. |
-| 🗣 | **Voice notes in another voice** | Record yourself. Gnani Prisma transcribes it, then **Gnani Timbre v3.0** re-speaks your exact words in one of **6 natural voices** (Devansh, Yashraj, Avinash, Lakshmi, Shivani, Riyaa). It's sent to the open chat, and the chat is selected automatically only when exactly one matches. |
-| ⏰ | **Deadline reminders** | “Update me by 6 PM”, “I'll send the review by Monday”. ConvoAI spots deadlines **you owe** in the chats you open and notifies you before they're due (30 min by default; 9:00 AM for “by Monday”). A card offers Undo, and the notification has ✓ Done and Snooze buttons. |
-| 🏠 | **Home & catch-up** | On/off switch, live permission checklist, catch-up summary of the open chat, upcoming reminders, speech language and default voice. Follows the system light/dark theme. |
-| 🎓 | **Interactive tutorial** | A guided practice chat with a glowing spotlight on the next button to press, voice samples (▶) and plain-language permission steps. |
+|     | Feature                          | What it does                                                                                                                                                                                                                                                                               |
+| --- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 🫧  | **Smart bubble**                 | Appears **only inside a WhatsApp chat**, just above the message box. It hides everywhere else (chat list, Status, other apps). Drag it to either edge and it remembers the spot. The toolbar closes on any outside touch, and dragging the bubble to the bottom turns ConvoAI off.         |
+| ✨  | **Improve**                      | Rewrites your draft to fit the conversation: casual Hinglish with a friend, polite English with your boss. The tone is **inferred from the chat**, never from a contact name or preset. Checks keep your meaning, script and day (“tomorrow”).                                             |
+| 💬  | **Smart replies**                | Three replies in the chat's own language and tone. Every message carries its **send date**, so ConvoAI knows that yesterday's “kal subah tak bhej dunga” is overdue this morning and suggests a nudge.                                                                                     |
+| 🌐  | **Translate**                    | Hold 🌐 and glide to **English** or **हिन्दी**, then tap. Your draft is replaced with the translation in the right script (Roman Hinglish → Devanagari), in the same tone. Empty or one-word drafts never make an AI call.                                                                 |
+| 🎙  | **Dictate**                      | Speak in any of **10 Indian languages**, and **Gnani Prisma** types it into the message box. Hold and glide to switch language.                                                                                                                                                            |
+| 🗣  | **Voice notes in another voice** | Record yourself. Gnani Prisma transcribes it, then **Gnani Timbre v3.0** re-speaks your exact words in one of **6 natural voices** (Devansh, Yashraj, Avinash, Lakshmi, Shivani, Riyaa). It's sent to the open chat, and the chat is selected automatically only when exactly one matches. |
+| ⏰  | **Deadline reminders**           | “Update me by 6 PM”, “I'll send the review by Monday”. ConvoAI spots deadlines **you owe** in the chats you open and notifies you before they're due (30 min by default; 9:00 AM for “by Monday”). A card offers Undo, and the notification has ✓ Done and Snooze buttons.                 |
+| 🏠  | **Home & catch-up**              | On/off switch, live permission checklist, catch-up summary of the open chat, upcoming reminders, speech language and default voice. Follows the system light/dark theme.                                                                                                                   |
+| 🎓  | **Interactive tutorial**         | A guided practice chat with a glowing spotlight on the next button to press, voice samples (▶) and plain-language permission steps.                                                                                                                                                        |
 
 ### 🔒 Private by design
 
@@ -100,11 +100,11 @@ flowchart TB
     Overlay -- insert text · send voice note --> WA
 ```
 
-| Layer | Where | Role |
-|---|---|---|
-| **Native (Kotlin)** | `modules/indic-context/android/` | Reads the chat (accessibility service), draws the overlay, records audio, calls Gnani STT/TTS, schedules alarms and inserts text. |
-| **Bridge** | `IndicContextModule.kt` ⇄ `modules/indic-context/src/index.ts` | Typed async functions and events between Kotlin and TypeScript. |
-| **App (React Native)** | `app/`, `src/` | Screens, the `CopilotBridge` event hub, the LLM layer, prompts and reminder detection. |
+| Layer                  | Where                                                          | Role                                                                                                                              |
+| ---------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **Native (Kotlin)**    | `modules/indic-context/android/`                               | Reads the chat (accessibility service), draws the overlay, records audio, calls Gnani STT/TTS, schedules alarms and inserts text. |
+| **Bridge**             | `IndicContextModule.kt` ⇄ `modules/indic-context/src/index.ts` | Typed async functions and events between Kotlin and TypeScript.                                                                   |
+| **App (React Native)** | `app/`, `src/`                                                 | Screens, the `CopilotBridge` event hub, the LLM layer, prompts and reminder detection.                                            |
 
 ### Flow: ✨ Improve (Smart replies and Translate work the same way)
 
@@ -177,16 +177,16 @@ More detail is in [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md), a beginner-f
 
 ## 🛠 Tech stack
 
-| Area | Technology |
-|---|---|
-| **App** | [Expo SDK 51](https://docs.expo.dev/), React Native 0.74, React 18, TypeScript (strict), expo-router |
-| **Native** | Kotlin [Expo module](https://docs.expo.dev/modules/overview/) (`indic-context`), Android AccessibilityService, `TYPE_APPLICATION_OVERLAY` windows, MediaRecorder, AlarmManager, NotificationCompat, FileProvider |
-| **Speech-to-text** | **Gnani Prisma v3**: `POST https://api.vachana.ai/stt/v3`, 10 Indian languages |
-| **Text-to-speech** | **Gnani Timbre v3.0**: `POST https://api.vachana.ai/api/v1/tts/inference`, 6 voices, Ogg/Opus |
-| **LLM** | **Gemini 3.5 Flash Lite** (`generateContent`, JSON mode, thinking levels); **Gnani Evon** or any OpenAI-compatible endpoint, switchable with one env var |
-| **Design** | [`DESIGN.md`](DESIGN.md) tokens: rose palette, **Poppins**, radius 4/8/12, Bento layout, light and dark themes, reduced-motion support |
-| **Testing** | Live prompt eval (`scripts/evalPrompts.ts`), JUnit tests for date parsing and reminder times |
-| **Showcase** | [`demo/`](demo/): an animated presentation deck (Vite + React + framer-motion) for the demo video |
+| Area               | Technology                                                                                                                                                                                                       |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **App**            | [Expo SDK 51](https://docs.expo.dev/), React Native 0.74, React 18, TypeScript (strict), expo-router                                                                                                             |
+| **Native**         | Kotlin [Expo module](https://docs.expo.dev/modules/overview/) (`indic-context`), Android AccessibilityService, `TYPE_APPLICATION_OVERLAY` windows, MediaRecorder, AlarmManager, NotificationCompat, FileProvider |
+| **Speech-to-text** | **Gnani Prisma v3**: `POST https://api.vachana.ai/stt/v3`, 10 Indian languages                                                                                                                                   |
+| **Text-to-speech** | **Gnani Timbre v3.0**: `POST https://api.vachana.ai/api/v1/tts/inference`, 6 voices, Ogg/Opus                                                                                                                    |
+| **LLM**            | **Gemini 3.5 Flash Lite** (`generateContent`, JSON mode, thinking levels); **Gnani Evon** or any OpenAI-compatible endpoint, switchable with one env var                                                         |
+| **Design**         | [`DESIGN.md`](DESIGN.md) tokens: rose palette, **Poppins**, radius 4/8/12, Bento layout, light and dark themes, reduced-motion support                                                                           |
+| **Testing**        | Live prompt eval (`scripts/evalPrompts.ts`), JUnit tests for date parsing and reminder times                                                                                                                     |
+| **Showcase**       | [`demo/`](demo/): an animated presentation deck (Vite + React + framer-motion) for the demo video                                                                                                                |
 
 **Android:** min SDK 23 (Android 6.0), target SDK 34. Tested on a real device running Android 15.
 
@@ -231,6 +231,14 @@ gnani-pro/
 
 ---
 
+## Download & Installation
+
+Tap the badge below to download the latest official APK directly to your Android device:
+
+[![Download APK](https://shields.io)](https://github.com/thepiyush-303/gnani-pro/releases/tag/v1.0.0)
+
+_Note: You may need to enable "Install from Unknown Sources" in your Android settings._
+
 ## 🚀 Getting started
 
 ### Prerequisites
@@ -253,12 +261,12 @@ cp .env.example .env      # then fill in your keys
 
 ### 2. Configure `.env`
 
-| Variable | Purpose |
-|---|---|
-| `EXPO_PUBLIC_GNANI_API_KEY` | Gnani Prisma (STT) and Timbre (TTS) |
-| `EXPO_PUBLIC_LLM_PROVIDER` | `gemini` (default) or `evon` |
-| `EXPO_PUBLIC_GEMINI_API_KEY` | Gemini API key |
-| `EXPO_PUBLIC_GEMINI_MODEL` | Defaults to `gemini-3.5-flash-lite` |
+| Variable                                            | Purpose                                                                          |
+| --------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `EXPO_PUBLIC_GNANI_API_KEY`                         | Gnani Prisma (STT) and Timbre (TTS)                                              |
+| `EXPO_PUBLIC_LLM_PROVIDER`                          | `gemini` (default) or `evon`                                                     |
+| `EXPO_PUBLIC_GEMINI_API_KEY`                        | Gemini API key                                                                   |
+| `EXPO_PUBLIC_GEMINI_MODEL`                          | Defaults to `gemini-3.5-flash-lite`                                              |
 | `EXPO_PUBLIC_EVON_ENDPOINT` / `_MODEL` / `_API_KEY` | Any OpenAI-compatible `/chat/completions` endpoint (when the provider is `evon`) |
 
 > ⚠️ `EXPO_PUBLIC_*` values are **compiled into the app**, so anyone with the APK can extract them. Use restricted or rotating keys for shared builds, and route AI calls through a server before a public release. Restart Metro with `--clear` after editing `.env`.
@@ -293,25 +301,25 @@ npm run build:apk:share
 # → android/app/build/outputs/apk/release/app-release.apk  (signed with the debug key)
 ```
 
-| | Dev build (`npm run android`) | Shareable build (`build:apk:share`) |
-|---|---|---|
-| JavaScript | loaded live from Metro | bundled in the APK |
-| Works without your computer | ❌ | ✅ |
-| Use for | day-to-day development | testers, demos |
+|                             | Dev build (`npm run android`) | Shareable build (`build:apk:share`) |
+| --------------------------- | ----------------------------- | ----------------------------------- |
+| JavaScript                  | loaded live from Metro        | bundled in the APK                  |
+| Works without your computer | ❌                            | ✅                                  |
+| Use for                     | day-to-day development        | testers, demos                      |
 
 The release build is signed with the debug keystore, which is fine for testers and demos. Create a real keystore before publishing to the Play Store.
 
 ### Commands
 
-| Command | What it does |
-|---|---|
-| `npm run android` | Build and install the dev build |
-| `npm run start:usb` / `npm run android:usb` | Develop over a USB cable |
-| `npm run build:apk:share` | Shareable release APK |
-| `npx tsc --noEmit` | Type check |
-| `cd android && ./gradlew :indic-context:testDebugUnitTest` | Kotlin unit tests |
-| `npm run eval:prompts` | Live prompt regression checks (uses API quota) |
-| `npx expo prebuild --platform android --no-install` | Apply `app.json` / plugin changes to `android/` |
+| Command                                                    | What it does                                    |
+| ---------------------------------------------------------- | ----------------------------------------------- |
+| `npm run android`                                          | Build and install the dev build                 |
+| `npm run start:usb` / `npm run android:usb`                | Develop over a USB cable                        |
+| `npm run build:apk:share`                                  | Shareable release APK                           |
+| `npx tsc --noEmit`                                         | Type check                                      |
+| `cd android && ./gradlew :indic-context:testDebugUnitTest` | Kotlin unit tests                               |
+| `npm run eval:prompts`                                     | Live prompt regression checks (uses API quota)  |
+| `npx expo prebuild --platform android --no-install`        | Apply `app.json` / plugin changes to `android/` |
 
 ---
 
@@ -326,6 +334,7 @@ The release build is signed with the debug keystore, which is fine for testers a
   - reminders that are yours vs the contact's, already done, or past.
 
   Raise the delay between calls with `EVAL_PACE_MS=9000` if you hit free-tier rate limits.
+
 - **On the device:** see the checklists in [`docs/UI_REDESIGN.md`](docs/UI_REDESIGN.md) and [`docs/REMINDERS.md`](docs/REMINDERS.md). For debugging, the reminder pipeline writes every step to the phone's log:
 
   ```bash
@@ -347,18 +356,18 @@ Contributions are welcome: bug reports, prompt improvements, new languages and U
 
 ### Ground rules for the code
 
-| Rule | Why |
-|---|---|
-| **All LLM calls go through `src/services/llm/llmClient.ts`** (`callLlmJson` + a validator). | One place for timeouts, typed errors and the provider switch. |
-| **No canned or template fallbacks.** Throw an `LlmError` and let the UI show Retry. | Users must know when the AI failed. |
-| **No persona or relationship presets.** The tone is inferred from the conversation in the prompt. | Guessing from names is unreliable. |
-| **AI runs only on a user action.** The filtered deadline detector is the single exception. | Quota, privacy and no surprise popups. |
-| **Never write chat messages to disk.** Reminders are the only stored data. | Privacy promise. |
-| **Overlay events are handled only in `src/hooks/CopilotBridge.tsx`.** | One event hub, so features work on any screen. |
-| **Don't use `setTimeout` in code that runs while WhatsApp is in front.** | React Native pauses JS timers when ConvoAI's activity is in the background. |
-| **Styling uses `src/ui/theme.ts` tokens** (`font.*` carries `fontFamily`; never `fontWeight`) and follows [`DESIGN.md`](DESIGN.md). | Consistent look; Android needs one font family per weight. |
-| **Log with `IndicContext.debugLog`** where logs must appear in release builds (logcat tag `ConvoAI.JS`). | `console.log` isn't visible in release logcat. |
-| **Never commit `.env`** or API keys. | Secrets. |
+| Rule                                                                                                                                | Why                                                                         |
+| ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **All LLM calls go through `src/services/llm/llmClient.ts`** (`callLlmJson` + a validator).                                         | One place for timeouts, typed errors and the provider switch.               |
+| **No canned or template fallbacks.** Throw an `LlmError` and let the UI show Retry.                                                 | Users must know when the AI failed.                                         |
+| **No persona or relationship presets.** The tone is inferred from the conversation in the prompt.                                   | Guessing from names is unreliable.                                          |
+| **AI runs only on a user action.** The filtered deadline detector is the single exception.                                          | Quota, privacy and no surprise popups.                                      |
+| **Never write chat messages to disk.** Reminders are the only stored data.                                                          | Privacy promise.                                                            |
+| **Overlay events are handled only in `src/hooks/CopilotBridge.tsx`.**                                                               | One event hub, so features work on any screen.                              |
+| **Don't use `setTimeout` in code that runs while WhatsApp is in front.**                                                            | React Native pauses JS timers when ConvoAI's activity is in the background. |
+| **Styling uses `src/ui/theme.ts` tokens** (`font.*` carries `fontFamily`; never `fontWeight`) and follows [`DESIGN.md`](DESIGN.md). | Consistent look; Android needs one font family per weight.                  |
+| **Log with `IndicContext.debugLog`** where logs must appear in release builds (logcat tag `ConvoAI.JS`).                            | `console.log` isn't visible in release logcat.                              |
+| **Never commit `.env`** or API keys.                                                                                                | Secrets.                                                                    |
 
 ### Before you open a pull request
 
@@ -371,6 +380,7 @@ Contributions are welcome: bug reports, prompt improvements, new languages and U
 ### Reporting bugs
 
 Please include:
+
 - your phone model and Android version;
 - your WhatsApp version;
 - the steps to reproduce;
@@ -383,16 +393,16 @@ Please include:
 
 ## 📚 Documentation
 
-| Doc | Contents |
-|---|---|
+| Doc                                              | Contents                                                                          |
+| ------------------------------------------------ | --------------------------------------------------------------------------------- |
 | [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md) | Beginner-friendly guide to the whole project: architecture, data flow, every file |
-| [`docs/CLAUDE.md`](docs/CLAUDE.md) | Commands and conventions for contributors and AI coding agents |
-| [`docs/AI_OVERHAUL.md`](docs/AI_OVERHAUL.md) | Design of the LLM layer: role-tagged payloads, no personas, validation |
-| [`docs/VOICE_CHANGER.md`](docs/VOICE_CHANGER.md) | 🗣 Voice notes: recording, Prisma → Timbre, guarded auto-send |
-| [`docs/REMINDERS.md`](docs/REMINDERS.md) | ⏰ Deadline reminders: pipeline, rules, privacy, debugging |
-| [`docs/UI_REDESIGN.md`](docs/UI_REDESIGN.md) | UI system, accessibility contrast notes, on-device checklist |
-| [`DESIGN.md`](DESIGN.md) | Design tokens: colours, type, spacing, motion |
-| [`demo/README.md`](demo/README.md) | The presentation deck for the demo video |
+| [`docs/CLAUDE.md`](docs/CLAUDE.md)               | Commands and conventions for contributors and AI coding agents                    |
+| [`docs/AI_OVERHAUL.md`](docs/AI_OVERHAUL.md)     | Design of the LLM layer: role-tagged payloads, no personas, validation            |
+| [`docs/VOICE_CHANGER.md`](docs/VOICE_CHANGER.md) | 🗣 Voice notes: recording, Prisma → Timbre, guarded auto-send                     |
+| [`docs/REMINDERS.md`](docs/REMINDERS.md)         | ⏰ Deadline reminders: pipeline, rules, privacy, debugging                        |
+| [`docs/UI_REDESIGN.md`](docs/UI_REDESIGN.md)     | UI system, accessibility contrast notes, on-device checklist                      |
+| [`DESIGN.md`](DESIGN.md)                         | Design tokens: colours, type, spacing, motion                                     |
+| [`demo/README.md`](demo/README.md)               | The presentation deck for the demo video                                          |
 
 ---
 
